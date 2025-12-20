@@ -1,0 +1,59 @@
+# Build artifacts
+target/
+debug/
+*.so
+*.o
+*.a
+*.rlib
+*.dll
+*.dylib
+
+# Cargo
+Cargo.lock
+**/*.rs.bk
+.cargo/
+
+# Profiling
+*.profraw
+*.profdata
+perf.data
+perf.data.old
+flamegraph.svg
+callgrind.out.*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Test output
+output/
+test_output/
+*.log
+
+# Documentation
+doc/
+docs/_build/
+
+# Solana/Anchor
+.anchor/
+test-ledger/
+deploy/
+*.keypair
+
+# Coverage
+coverage/
+*.lcov
+tarpaulin-report.html

@@ -1,0 +1,45 @@
+[workspace]
+
+[package]
+name = "uncpi"
+version = "0.1.0"
+edition = "2021"
+description = "Transpile Anchor programs to Pinocchio for 85%+ size reduction"
+license = "MIT"
+repository = "https://github.com/openSVM/uncpi"
+keywords = ["solana", "anchor", "pinocchio", "transpiler", "optimization"]
+categories = ["development-tools", "compilers"]
+
+[[bin]]
+name = "uncpi"
+path = "src/main.rs"
+
+[dependencies]
+# Rust parsing
+syn = { version = "2.0", features = ["full", "parsing", "visit", "extra-traits"] }
+quote = "1.0"
+proc-macro2 = "1.0"
+
+# CLI
+clap = { version = "4.0", features = ["derive"] }
+
+# Code generation
+prettyplease = "0.2"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Serialization (for intermediate representation)
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Crypto for discriminator generation
+sha2 = "0.10"
+
+# Pattern matching
+regex = "1.10"
+
+[dev-dependencies]
+tempfile = "3.0"
+insta = "1.0"  # Snapshot testing
