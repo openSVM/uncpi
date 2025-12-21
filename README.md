@@ -4,7 +4,7 @@
 [![CI](https://github.com/openSVM/uncpi/workflows/CI/badge.svg)](https://github.com/openSVM/uncpi/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-> "ok unc, let me show you how to optimize"
+> "ok unc, optimize my anchor uwu" (c) clanker
 
 Transpile Anchor programs to Pinocchio for 85%+ binary size reduction.
 
