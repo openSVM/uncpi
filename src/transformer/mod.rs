@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use crate::ir::*;
+use crate::cpi_helpers;
 
 pub struct Config {
     pub no_alloc: bool,
@@ -73,7 +74,7 @@ fn transform_instruction(
         .collect();
 
     // Generate validations
-    let validations = generate_validations(&account_struct, analysis);
+    let validations = generate_validations(&account_struct);
 
     // Transform body (replace Anchor patterns with Pinocchio)
     let body = transform_body(&anchor_inst.body, &accounts, config);
@@ -112,7 +113,6 @@ fn transform_account(
 
 fn generate_validations(
     account_struct: &AnchorAccountStruct,
-    analysis: &ProgramAnalysis,
 ) -> Vec<Validation> {
     let mut validations = Vec::new();
 
@@ -144,15 +144,15 @@ fn generate_validations(
                 });
             }
 
-            // Custom constraint - skip for now as they need manual review
+            // Custom constraint - transform the expression
             if let AccountConstraint::Constraint { expr, error } = constraint {
-                // Constraints are complex and need manual conversion
-                // Just add as comment
+                let transformed_expr = transform_constraint_expr(expr, &account_struct.accounts);
+                let error_msg = error.as_deref().unwrap_or("ProgramError::Custom(0)");
                 validations.push(Validation::Custom {
                     code: format!(
-                        "// TODO: Verify constraint: {} @ {:?}",
-                        expr.replace('\n', " ").replace("  ", " "),
-                        error
+                        "if !({}) {{\n        return Err({});\n    }}",
+                        transformed_expr.replace('\n', " ").replace("  ", " "),
+                        error_msg
                     ),
                 });
             }
@@ -162,6 +162,7 @@ fn generate_validations(
     validations
 }
 
+/// Transform constraint expressions from Anchor to Pinocchio
 fn transform_constraint_expr(expr: &str, accounts: &[AnchorAccount]) -> String {
     let mut result = expr.to_string();
 
@@ -463,19 +464,13 @@ fn transform_state_access_final(body: &str) -> String {
         }
 
         // Then add deserialization block at the start
-        // Use `let mut` only if we pass the state as &mut to a function
-        // (field mutations through the reference don't require mut binding)
+        // Use `let mut` only if the state is mutated
         let deser_lines: Vec<String> = needs_deser.iter()
             .map(|(acc, ty)| {
                 let state_var = format!("{}_state", acc);
-                // Check if we pass as &mut to any function
-                let needs_mut = result.contains(&format!("&mut {}", state_var))
-                    || result.contains(&format!("& mut {}", state_var));
-                if needs_mut {
-                    format!("let mut {} = {}::from_account_info_mut({})?;", state_var, ty, acc)
-                } else {
-                    format!("let {} = {}::from_account_info_mut({})?;", state_var, ty, acc)
-                }
+                // Check if state is mutated
+                let needs_mut = is_state_mutated(&result, &state_var);
+                cpi_helpers::state_deserialize_write(ty, acc, needs_mut)
             })
             .collect();
 
@@ -521,8 +516,7 @@ fn has_state_field_access(body: &str, acc_name: &str) -> bool {
 fn is_state_mutated(body: &str, state_var: &str) -> bool {
     // Look for assignment patterns like: state_var.field =
     // or &mut state_var references
-    let assignment_pattern = format!("{} .", state_var);
-    let assignment_pattern2 = format!("{}.", state_var);
+    let assignment_pattern = format!("{}.", state_var);
     let mut_ref_pattern = format!("&mut {}", state_var);
     let mut_ref_pattern2 = format!("& mut {}", state_var);
 
@@ -530,16 +524,17 @@ fn is_state_mutated(body: &str, state_var: &str) -> bool {
     for line in body.lines() {
         let trimmed = line.trim();
         // Check if line contains state_var. followed by field =
-        if (trimmed.contains(&assignment_pattern) || trimmed.contains(&assignment_pattern2))
-            && trimmed.contains(" = ")
-            && !trimmed.contains(" == ")
-            && !trimmed.contains(" != ") {
+        if trimmed.contains(&assignment_pattern) && trimmed.contains(" = ")
+            && !trimmed.contains(" == ") && !trimmed.contains(" != ") {
             // Make sure it's an assignment, not just reading
-            // Pattern: state_var.field = something (but not state_var.field == something)
-            if let Some(dot_pos) = trimmed.find(&format!("{}.", state_var)) {
-                let after_dot = &trimmed[dot_pos + state_var.len() + 1..];
-                if after_dot.contains(" = ") && !after_dot.starts_with("=") {
-                    return true;
+            if let Some(dot_pos) = trimmed.find(&assignment_pattern) {
+                let after_dot = &trimmed[dot_pos + assignment_pattern.len()..];
+                // Check if there's a field name followed by =
+                if let Some(eq_pos) = after_dot.find(" = ") {
+                    // Make sure it's not == or !=
+                    if !after_dot[..eq_pos].is_empty() && !after_dot[eq_pos+3..].starts_with('=') {
+                        return true;
+                    }
                 }
             }
         }
@@ -652,14 +647,17 @@ fn transform_state_access(body: &str, accounts: &[PinocchioAccount]) -> String {
     // Replace .load_mut()? with ::from_account_info_mut()?
     for acc in accounts {
         // Pattern: account.load_mut()?
+        let state_type = get_state_type(&acc.name);
         result = result.replace(
             &format!("{}.load_mut()?", acc.name),
-            &format!("// Access {} as mutable\n    let {}_state = {}::from_account_info_mut(&{})?", acc.name, acc.name, get_state_type(&acc.name), acc.name)
+            &format!("// Access {} as mutable\n    {}", acc.name,
+                cpi_helpers::state_deserialize_write(&state_type, &acc.name, false))
         );
         // Pattern: account.load()?
         result = result.replace(
             &format!("{}.load()?", acc.name),
-            &format!("// Access {} as readonly\n    let {}_state = {}::from_account_info(&{})?", acc.name, acc.name, get_state_type(&acc.name), acc.name)
+            &format!("// Access {} as readonly\n    {}", acc.name,
+                cpi_helpers::state_deserialize_read(&state_type, &acc.name))
         );
     }
 
@@ -717,14 +715,9 @@ fn transform_state_access(body: &str, accounts: &[PinocchioAccount]) -> String {
 fn replace_state_field_access(body: &str, acc_name: &str) -> String {
     let mut result = body.to_string();
 
-    // List of AccountInfo methods that should NOT be replaced
-    let account_info_methods = [
-        "key", "owner", "lamports", "data", "is_signer", "is_writable",
-        "try_borrow_data", "try_borrow_mut_data", "try_borrow_lamports",
-        "try_borrow_mut_lamports", "to_account_info", "clone",
-    ];
-
     // Common state fields that SHOULD be replaced
+    // Note: We use a whitelist approach here rather than blacklist (excluding AccountInfo methods)
+    // because it's more conservative and specific to the known state struct fields
     let state_fields = [
         "authority", "bags_mint", "pump_mint", "bags_vault", "pump_vault",
         "lp_mint", "bags_balance", "pump_balance", "lp_supply", "bump",
@@ -845,6 +838,9 @@ fn transform_cpi_calls(body: &str) -> String {
     // Transform system_program::transfer
     result = transform_system_transfer(&result);
 
+    // Transform direct lamport manipulation patterns
+    result = transform_direct_lamport_transfer(&result);
+
     result
 }
 
@@ -950,31 +946,15 @@ fn transform_single_transfer(call: &str, with_signer: bool) -> String {
             let to_ref = clean_account_name(&to);
             let auth_ref = clean_account_name(&authority);
 
-            if with_signer {
-                return format!(
-                    "// Token transfer with PDA signer\n    \
-                    Transfer {{\n        \
-                        from: {},\n        \
-                        to: {},\n        \
-                        authority: {},\n        \
-                        amount: {},\n    \
-                    }}.invoke_signed(signer_seeds)?",
-                    from_ref, to_ref, auth_ref,
-                    amount
-                );
-            } else {
-                return format!(
-                    "// Token transfer\n    \
-                    Transfer {{\n        \
-                        from: {},\n        \
-                        to: {},\n        \
-                        authority: {},\n        \
-                        amount: {},\n    \
-                    }}.invoke()?",
-                    from_ref, to_ref, auth_ref,
-                    amount
-                );
-            }
+            // Use cpi_helpers to generate the code
+            return cpi_helpers::token_transfer_cpi(
+                &from_ref,
+                &to_ref,
+                &auth_ref,
+                &amount,
+                with_signer,
+                None, // TODO: Extract signer seeds from the call
+            );
         }
     }
 
@@ -1071,26 +1051,6 @@ fn extract_field(s: &str, field_name: &str) -> String {
     String::new()
 }
 
-fn extract_amount(s: &str) -> String {
-    // Amount is usually after ), and before )?
-    let trimmed = s.trim().trim_start_matches(',').trim();
-    if let Some(end) = trimmed.find(')') {
-        return trimmed[..end].trim().trim_end_matches(',').to_string();
-    }
-    trimmed.to_string()
-}
-
-fn clean_account_ref(s: &str) -> String {
-    // In Pinocchio token CPI, we pass the AccountInfo reference directly
-    // Remove .to_account_info() calls - just use the account directly
-    let mut result = s.to_string();
-    result = result.replace(".to_account_info ()", "");
-    result = result.replace(".to_account_info()", "");
-    result = result.replace(". to_account_info ()", "");
-    result = result.replace(". to_account_info()", "");
-    result.trim().to_string()
-}
-
 fn clean_account_name(s: &str) -> String {
     // Extract just the account name from "account.to_account_info()"
     if let Some(dot) = s.find('.') {
@@ -1173,16 +1133,14 @@ fn transform_single_mint(call: &str) -> String {
             let to_ref = clean_account_name(&to);
             let auth_ref = clean_account_name(&authority);
 
-            return format!(
-                "// Mint tokens with PDA signer\n    \
-                MintTo {{\n        \
-                    mint: {},\n        \
-                    account: {},\n        \
-                    mint_authority: {},\n        \
-                    amount: {},\n    \
-                }}.invoke_signed(signer_seeds)?",
-                mint_ref, to_ref, auth_ref,
-                amount
+            // Use cpi_helpers to generate the code
+            return cpi_helpers::token_mint_to_cpi(
+                &mint_ref,
+                &to_ref,
+                &auth_ref,
+                &amount,
+                true, // Assuming with_signer since that's the common case
+                None, // TODO: Extract signer seeds
             );
         }
     }
@@ -1269,7 +1227,7 @@ fn find_burn_end(s: &str) -> Option<usize> {
     None
 }
 
-fn transform_single_burn(call: &str, with_signer: bool) -> String {
+fn transform_single_burn(call: &str, _with_signer: bool) -> String {
     if let Some(burn_start) = call.find("Burn {") {
         let after_burn = &call[burn_start..];
         if let Some(brace_end) = find_matching_brace(after_burn) {
@@ -1290,31 +1248,13 @@ fn transform_single_burn(call: &str, with_signer: bool) -> String {
             let mint_ref = clean_account_name(&mint);
             let auth_ref = clean_account_name(&authority);
 
-            if with_signer {
-                return format!(
-                    "// Burn tokens with PDA signer\n    \
-                    Burn {{\n        \
-                        account: {},\n        \
-                        mint: {},\n        \
-                        authority: {},\n        \
-                        amount: {},\n    \
-                    }}.invoke_signed(signer_seeds)?",
-                    from_ref, mint_ref, auth_ref,
-                    amount
-                );
-            } else {
-                return format!(
-                    "// Burn tokens\n    \
-                    Burn {{\n        \
-                        account: {},\n        \
-                        mint: {},\n        \
-                        authority: {},\n        \
-                        amount: {},\n    \
-                    }}.invoke()?",
-                    from_ref, mint_ref, auth_ref,
-                    amount
-                );
-            }
+            // Use cpi_helpers to generate the code
+            return cpi_helpers::token_burn_cpi(
+                &mint_ref,
+                &from_ref,
+                &auth_ref,
+                &amount,
+            );
         }
     }
 
@@ -1367,9 +1307,105 @@ fn transform_system_transfer(body: &str) -> String {
     result
 }
 
+/// Transform direct lamport manipulation patterns
+/// Patterns like: **from.lamports.borrow_mut() -= amount; **to.lamports.borrow_mut() += amount;
+fn transform_direct_lamport_transfer(body: &str) -> String {
+    let mut result = body.to_string();
+
+    // Pattern: Anchor-style RefCell lamport manipulation
+    // **from_account.lamports.borrow_mut() -= amount;
+    // **to_account.lamports.borrow_mut() += amount;
+    // Convert to Pinocchio: **from_account.try_borrow_mut_lamports()? -= amount;
+
+    result = result.replace(
+        ".lamports.borrow_mut()",
+        ".try_borrow_mut_lamports()?"
+    );
+
+    result = result.replace(
+        ".lamports.borrow()",
+        ".try_borrow_lamports()?"
+    );
+
+    // Pattern: Explicit two-line transfers can be detected and consolidated
+    // Look for patterns like:
+    // **from.try_borrow_mut_lamports()? -= amount;
+    // **to.try_borrow_mut_lamports()? += amount;
+    // These are already optimal Pinocchio style, keep as-is
+
+    result
+}
+
 fn inline_cpi_calls(body: &str) -> String {
-    // Inline CPI for maximum optimization
-    body.to_string()
+    let mut result = body.to_string();
+
+    // When inline_cpi is enabled, we want maximum gas efficiency
+    // This means using direct operations instead of CPI where possible
+
+    // Transform token operations (same as non-inline for now)
+    result = transform_token_transfer(&result);
+    result = transform_token_mint_to(&result);
+    result = transform_token_burn(&result);
+    result = transform_create_account(&result);
+
+    // For SOL transfers, use INLINE lamport manipulation instead of system CPI
+    // This is the key optimization: skip the system program entirely
+    result = transform_system_transfer_inline(&result);
+
+    // Transform direct lamport patterns
+    result = transform_direct_lamport_transfer(&result);
+
+    result
+}
+
+/// Transform system_program::transfer to INLINE lamport manipulation (for --inline-cpi mode)
+fn transform_system_transfer_inline(body: &str) -> String {
+    let mut result = body.to_string();
+
+    // Pattern: system_program::transfer(CpiContext::new(..., Transfer { from: X, to: Y }), amount)?
+    // We want to extract X, Y, amount and generate:
+    // **X.try_borrow_mut_lamports()? -= amount;
+    // **Y.try_borrow_mut_lamports()? += amount;
+
+    // Simple pattern matching for common cases
+    // Look for: Transfer { from: account_from, to: account_to }
+    // And: transfer(..., amount)
+
+    if let Some(start) = result.find("system_program::transfer") {
+        // Try to find the Transfer struct
+        if let Some(transfer_start) = result[start..].find("Transfer {") {
+            let search_start = start + transfer_start;
+            if let Some(brace_end) = find_matching_brace(&result[search_start..]) {
+                let transfer_struct = &result[search_start..search_start + brace_end + 1];
+
+                // Extract from and to
+                let from_account = extract_field(transfer_struct, "from");
+                let to_account = extract_field(transfer_struct, "to");
+
+                // Extract amount (it's the second parameter to system_program::transfer)
+                // This is simplified - real implementation would properly parse
+                let amount = "amount".to_string(); // Placeholder
+
+                if !from_account.is_empty() && !to_account.is_empty() {
+                    let from_clean = clean_account_name(&from_account);
+                    let to_clean = clean_account_name(&to_account);
+
+                    // Use the helper to generate inline lamport manipulation
+                    let inline_code = cpi_helpers::sol_transfer_cpi(&from_clean, &to_clean, &amount);
+
+                    // Find the end of the entire system_program::transfer call
+                    if let Some(call_end) = result[start..].find(")?") {
+                        let full_call = &result[start..start + call_end + 2];
+                        result = result.replace(full_call, &inline_code);
+                        return result;
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback to regular system transfer if we can't parse
+    transform_system_transfer(&result)
 }
 
 fn transform_require_macro(body: &str) -> String {

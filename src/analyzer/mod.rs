@@ -151,19 +151,3 @@ fn estimate_field_size(ty: &str) -> usize {
         _ => 32, // Conservative estimate for unknown types
     }
 }
-
-/// Calculate instruction discriminators (Anchor uses first 8 bytes of SHA256)
-pub fn calculate_discriminator(namespace: &str, name: &str) -> [u8; 8] {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    // Anchor uses: sha256("global:{instruction_name}")[0..8]
-    // We'll use a simpler approach for now
-    let full_name = format!("{}:{}", namespace, name);
-
-    let mut hasher = DefaultHasher::new();
-    full_name.hash(&mut hasher);
-    let hash = hasher.finish();
-
-    hash.to_le_bytes()
-}

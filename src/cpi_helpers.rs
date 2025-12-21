@@ -115,7 +115,9 @@ pub fn token_burn_cpi(
     )
 }
 
-/// Generate Pinocchio SOL transfer
+/// Generate Pinocchio SOL transfer (direct lamport manipulation)
+/// Used when we want to generate inline SOL transfers instead of system_program CPI
+/// This is the most gas-efficient way to transfer SOL in Pinocchio
 pub fn sol_transfer_cpi(
     from_account: &str,
     to_account: &str,
@@ -130,36 +132,33 @@ pub fn sol_transfer_cpi(
     )
 }
 
-/// Common patterns for Pinocchio state access
-pub fn state_read(state_type: &str, account: &str) -> String {
+/// Generate state deserialization code (readonly)
+/// Matches the pattern used in transformer: let {account}_state = {StateType}::from_account_info({account})?
+pub fn state_deserialize_read(state_type: &str, account_name: &str) -> String {
     format!(
-        r#"let {} = {}::from_account_info({})?;"#,
-        to_snake_case(state_type),
+        "let {}_state = {}::from_account_info({})?;",
+        account_name,
         state_type,
-        account
+        account_name
     )
 }
 
-pub fn state_write(state_type: &str, account: &str) -> String {
-    format!(
-        r#"let {} = {}::from_account_info_mut({})?;"#,
-        to_snake_case(state_type),
-        state_type,
-        account
-    )
-}
-
-fn to_snake_case(s: &str) -> String {
-    let mut result = String::new();
-    for (i, c) in s.chars().enumerate() {
-        if c.is_uppercase() {
-            if i > 0 {
-                result.push('_');
-            }
-            result.push(c.to_lowercase().next().unwrap());
-        } else {
-            result.push(c);
-        }
+/// Generate state deserialization code (mutable)
+/// Matches the pattern used in transformer: let {account}_state = {StateType}::from_account_info_mut({account})?
+pub fn state_deserialize_write(state_type: &str, account_name: &str, needs_mut: bool) -> String {
+    if needs_mut {
+        format!(
+            "let mut {}_state = {}::from_account_info_mut({})?;",
+            account_name,
+            state_type,
+            account_name
+        )
+    } else {
+        format!(
+            "let {}_state = {}::from_account_info_mut({})?;",
+            account_name,
+            state_type,
+            account_name
+        )
     }
-    result
 }

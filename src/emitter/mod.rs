@@ -5,11 +5,7 @@ use std::path::Path;
 use std::fs;
 
 use crate::ir::*;
-use crate::parser::{SourceExtras, ConstantDef, HelperFunction};
-
-pub fn emit(program: &PinocchioProgram, output_dir: &Path) -> Result<()> {
-    emit_with_extras(program, output_dir, None)
-}
+use crate::parser::SourceExtras;
 
 pub fn emit_with_extras(program: &PinocchioProgram, output_dir: &Path, extras: Option<&SourceExtras>) -> Result<()> {
     fs::create_dir_all(output_dir)?;
@@ -735,7 +731,7 @@ fn emit_instruction(
                 }
                 let acc = &inst.accounts[*account_idx];
                 // Generate actual PDA validation code
-                let seeds_code: Vec<String> = seeds.iter()
+                let mut seeds_code: Vec<String> = seeds.iter()
                     .map(|s| {
                         if s.starts_with("b\"") {
                             format!("{}.as_ref()", s)
@@ -750,21 +746,42 @@ fn emit_instruction(
                     })
                     .collect();
 
+                // If bump is explicitly provided, add it to seeds
+                if let Some(bump_var) = bump {
+                    seeds_code.push(format!("&[{}]", bump_var));
+                }
+
                 // Generate the PDA verification code
                 content.push_str(&format!(
                     "    // Verify PDA for {}\n",
                     acc.name
                 ));
-                content.push_str(&format!(
-                    "    let (expected_{}, {}_bump) = pinocchio::pubkey::find_program_address(\n",
-                    acc.name, acc.name
-                ));
-                content.push_str(&format!(
-                    "        &[{}],\n",
-                    seeds_code.join(", ")
-                ));
-                content.push_str("        program_id,\n");
-                content.push_str("    );\n");
+
+                if bump.is_some() {
+                    // If bump is provided, just derive PDA with it
+                    content.push_str(&format!(
+                        "    let expected_{} = pinocchio::pubkey::create_program_address(\n",
+                        acc.name
+                    ));
+                    content.push_str(&format!(
+                        "        &[{}],\n",
+                        seeds_code.join(", ")
+                    ));
+                    content.push_str("        program_id,\n");
+                    content.push_str("    )?;\n");
+                } else {
+                    // If bump is not provided, find it
+                    content.push_str(&format!(
+                        "    let (expected_{}, _bump) = pinocchio::pubkey::find_program_address(\n",
+                        acc.name
+                    ));
+                    content.push_str(&format!(
+                        "        &[{}],\n",
+                        seeds_code.join(", ")
+                    ));
+                    content.push_str("        program_id,\n");
+                    content.push_str("    );\n");
+                }
                 content.push_str(&format!(
                     "    if {}.key() != &expected_{} {{\n",
                     acc.name, acc.name
@@ -931,37 +948,4 @@ fn get_arg_parse_code(ty: &str, offset: usize, name: &str) -> (usize, String) {
             (0, format!("// TODO: Parse {} of type {} at offset {}", name, ty, offset))
         }
     }
-}
-
-/// Generate code for PDA verification
-fn generate_pda_verification(seeds: &[String], bump_name: Option<&str>, account_name: &str) -> String {
-    let seeds_code: Vec<String> = seeds.iter().map(|s| {
-        if s.starts_with("b\"") {
-            // Literal bytes
-            s.clone()
-        } else if s.contains(".key()") {
-            // Account key reference
-            format!("{}.as_ref()", s.replace(".key()", "").replace(".as_ref()", ""))
-        } else {
-            // Variable reference
-            format!("{}.as_ref()", s)
-        }
-    }).collect();
-
-    let bump_code = bump_name.map(|b| format!(", &[{}]", b)).unwrap_or_default();
-
-    format!(
-        r#"// Verify PDA for {}
-    let (expected_{}, expected_{}_bump) = Pubkey::find_program_address(
-        &[{}{}],
-        program_id,
-    );
-    if {}.key() != &expected_{} {{
-        return Err(ProgramError::InvalidSeeds);
-    }}"#,
-        account_name,
-        account_name, account_name,
-        seeds_code.join(", "), bump_code,
-        account_name, account_name
-    )
 }

@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use std::path::Path;
-use syn::{parse_file, Attribute, Item, ItemMod, ItemStruct, Field, Type, ItemConst, ItemFn};
+use syn::{parse_file, Attribute, Item, ItemMod, ItemStruct, Field, Type};
 use quote::ToTokens;
 
 use crate::ir::*;
@@ -23,6 +23,7 @@ pub struct ConstantDef {
 
 #[derive(Debug, Clone)]
 pub struct HelperFunction {
+    #[allow(dead_code)]
     pub name: String,
     pub signature: String,
     pub body: String,
