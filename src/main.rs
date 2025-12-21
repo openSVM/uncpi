@@ -2,17 +2,19 @@ use anyhow::Result;
 use clap::Parser as ClapParser;
 use std::path::PathBuf;
 
-mod parser;
 mod analyzer;
-mod transformer;
-mod emitter;
-mod ir;
 mod cpi_helpers;
+mod emitter;
 mod idl;
+mod ir;
+mod parser;
+mod transformer;
 
 #[derive(ClapParser, Debug)]
 #[command(name = "uncpi")]
-#[command(about = "\"ok unc, let me show you how to optimize\" - Transpile Anchor to Pinocchio for 85%+ size reduction")]
+#[command(
+    about = "\"ok unc, let me show you how to optimize\" - Transpile Anchor to Pinocchio for 85%+ size reduction"
+)]
 struct Args {
     /// Input Anchor program (lib.rs)
     #[arg(required = true)]
@@ -80,8 +82,14 @@ fn main() -> Result<()> {
 
     if args.verbose {
         println!("  Found {} instructions", anchor_program.instructions.len());
-        println!("  Found {} account structs", anchor_program.account_structs.len());
-        println!("  Found {} state structs", anchor_program.state_structs.len());
+        println!(
+            "  Found {} account structs",
+            anchor_program.account_structs.len()
+        );
+        println!(
+            "  Found {} state structs",
+            anchor_program.state_structs.len()
+        );
     }
 
     // Phase 2: Analyze
@@ -146,9 +154,18 @@ fn main() -> Result<()> {
             let verification = idl::verify_idl(&idl, original_idl_path)?;
             if verification.is_compatible {
                 println!("\n✅ IDL VERIFICATION PASSED");
-                println!("  Instructions: {}/{} match", verification.matching_instructions, verification.total_instructions);
-                println!("  Accounts: {}/{} match", verification.matching_accounts, verification.total_accounts);
-                println!("  Errors: {}/{} match", verification.matching_errors, verification.total_errors);
+                println!(
+                    "  Instructions: {}/{} match",
+                    verification.matching_instructions, verification.total_instructions
+                );
+                println!(
+                    "  Accounts: {}/{} match",
+                    verification.matching_accounts, verification.total_accounts
+                );
+                println!(
+                    "  Errors: {}/{} match",
+                    verification.matching_errors, verification.total_errors
+                );
             } else {
                 println!("\n❌ IDL VERIFICATION FAILED");
                 for issue in &verification.issues {

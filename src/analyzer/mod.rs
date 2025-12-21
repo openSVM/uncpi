@@ -1,7 +1,7 @@
 //! Analyze Anchor program structure
 
-use anyhow::Result;
 use crate::ir::*;
+use anyhow::Result;
 
 pub fn analyze(program: &AnchorProgram) -> Result<ProgramAnalysis> {
     let pdas = extract_pdas(program);
@@ -57,7 +57,11 @@ fn extract_cpi_calls(program: &AnchorProgram) -> Vec<CpiCall> {
             calls.push(CpiCall {
                 target_program: "token_program".to_string(),
                 instruction: "transfer".to_string(),
-                accounts: vec!["from".to_string(), "to".to_string(), "authority".to_string()],
+                accounts: vec![
+                    "from".to_string(),
+                    "to".to_string(),
+                    "authority".to_string(),
+                ],
             });
         }
 
@@ -65,7 +69,11 @@ fn extract_cpi_calls(program: &AnchorProgram) -> Vec<CpiCall> {
             calls.push(CpiCall {
                 target_program: "token_program".to_string(),
                 instruction: "mint_to".to_string(),
-                accounts: vec!["mint".to_string(), "to".to_string(), "authority".to_string()],
+                accounts: vec![
+                    "mint".to_string(),
+                    "to".to_string(),
+                    "authority".to_string(),
+                ],
             });
         }
 
@@ -73,7 +81,11 @@ fn extract_cpi_calls(program: &AnchorProgram) -> Vec<CpiCall> {
             calls.push(CpiCall {
                 target_program: "token_program".to_string(),
                 instruction: "burn".to_string(),
-                accounts: vec!["mint".to_string(), "from".to_string(), "authority".to_string()],
+                accounts: vec![
+                    "mint".to_string(),
+                    "from".to_string(),
+                    "authority".to_string(),
+                ],
             });
         }
 

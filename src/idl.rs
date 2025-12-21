@@ -1,9 +1,11 @@
 //! IDL Generator for Pinocchio programs
 //! Generates Anchor-compatible IDL JSON from the transpiled program
 
+use crate::ir::{
+    PinocchioError, PinocchioField, PinocchioInstruction, PinocchioProgram, PinocchioState,
+};
 use serde::{Deserialize, Serialize};
-use crate::ir::{PinocchioProgram, PinocchioInstruction, PinocchioState, PinocchioError, PinocchioField};
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Idl {
@@ -94,15 +96,21 @@ pub struct IdlError {
 
 /// Generate IDL from a PinocchioProgram
 pub fn generate_idl(program: &PinocchioProgram, program_id: Option<&str>) -> Idl {
-    let instructions: Vec<IdlInstruction> = program.instructions.iter()
+    let instructions: Vec<IdlInstruction> = program
+        .instructions
+        .iter()
         .map(|inst| instruction_to_idl(inst))
         .collect();
 
-    let accounts: Vec<IdlAccount> = program.state_structs.iter()
+    let accounts: Vec<IdlAccount> = program
+        .state_structs
+        .iter()
         .map(|state| state_to_idl_account(state))
         .collect();
 
-    let errors: Vec<IdlError> = program.errors.iter()
+    let errors: Vec<IdlError> = program
+        .errors
+        .iter()
         .enumerate()
         .map(|(i, err)| error_to_idl(err, 6000 + i as u32))
         .collect();
@@ -126,7 +134,9 @@ fn instruction_to_idl(inst: &PinocchioInstruction) -> IdlInstruction {
     // Calculate discriminator
     let disc = calculate_discriminator("global", &to_snake_case(&inst.name));
 
-    let accounts: Vec<IdlAccountItem> = inst.accounts.iter()
+    let accounts: Vec<IdlAccountItem> = inst
+        .accounts
+        .iter()
         .map(|acc| IdlAccountItem {
             name: to_camel_case(&acc.name),
             is_mut: acc.is_writable,
@@ -135,7 +145,9 @@ fn instruction_to_idl(inst: &PinocchioInstruction) -> IdlInstruction {
         })
         .collect();
 
-    let args: Vec<IdlArg> = inst.args.iter()
+    let args: Vec<IdlArg> = inst
+        .args
+        .iter()
         .map(|arg| IdlArg {
             name: to_camel_case(&arg.name),
             ty: rust_type_to_idl_type(&arg.ty),
@@ -152,7 +164,9 @@ fn instruction_to_idl(inst: &PinocchioInstruction) -> IdlInstruction {
 }
 
 fn state_to_idl_account(state: &PinocchioState) -> IdlAccount {
-    let fields: Vec<IdlField> = state.fields.iter()
+    let fields: Vec<IdlField> = state
+        .fields
+        .iter()
         .map(|f: &PinocchioField| IdlField {
             name: to_camel_case(&f.name),
             ty: rust_type_to_idl_type(&f.ty),
@@ -182,7 +196,7 @@ fn rust_type_to_idl_type(ty: &str) -> IdlType {
 
     // Handle Option<T>
     if ty.starts_with("Option<") && ty.ends_with(">") {
-        let inner = &ty[7..ty.len()-1];
+        let inner = &ty[7..ty.len() - 1];
         return IdlType::Option {
             option: Box::new(rust_type_to_idl_type(inner)),
         };
@@ -190,7 +204,7 @@ fn rust_type_to_idl_type(ty: &str) -> IdlType {
 
     // Handle Vec<T>
     if ty.starts_with("Vec<") && ty.ends_with(">") {
-        let inner = &ty[4..ty.len()-1];
+        let inner = &ty[4..ty.len() - 1];
         return IdlType::Vec {
             vec: Box::new(rust_type_to_idl_type(inner)),
         };
@@ -234,7 +248,9 @@ fn rust_type_to_idl_type(ty: &str) -> IdlType {
         _ => {
             // Check if it's a defined type (struct reference)
             if ty.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
-                IdlType::Defined { defined: ty.to_string() }
+                IdlType::Defined {
+                    defined: ty.to_string(),
+                }
             } else {
                 IdlType::Simple(ty.to_string())
             }
@@ -299,7 +315,10 @@ pub struct IdlVerification {
 }
 
 /// Verify generated IDL against original Anchor IDL
-pub fn verify_idl(generated: &Idl, original_path: &std::path::Path) -> anyhow::Result<IdlVerification> {
+pub fn verify_idl(
+    generated: &Idl,
+    original_path: &std::path::Path,
+) -> anyhow::Result<IdlVerification> {
     let original_content = std::fs::read_to_string(original_path)?;
     let original: serde_json::Value = serde_json::from_str(&original_content)?;
 
@@ -320,8 +339,16 @@ pub fn verify_idl(generated: &Idl, original_path: &std::path::Path) -> anyhow::R
 
         for (i, orig_inst) in orig_instructions.iter().enumerate() {
             let orig_name = orig_inst.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let orig_accounts = orig_inst.get("accounts").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-            let orig_args = orig_inst.get("args").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+            let orig_accounts = orig_inst
+                .get("accounts")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            let orig_args = orig_inst
+                .get("args")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
 
             if let Some(gen_inst) = generated.instructions.get(i) {
                 let mut matches = true;
@@ -337,7 +364,9 @@ pub fn verify_idl(generated: &Idl, original_path: &std::path::Path) -> anyhow::R
                 if gen_inst.accounts.len() != orig_accounts {
                     verification.issues.push(format!(
                         "Instruction '{}': account count mismatch {} vs {}",
-                        orig_name, gen_inst.accounts.len(), orig_accounts
+                        orig_name,
+                        gen_inst.accounts.len(),
+                        orig_accounts
                     ));
                     matches = false;
                 }
@@ -345,7 +374,9 @@ pub fn verify_idl(generated: &Idl, original_path: &std::path::Path) -> anyhow::R
                 if gen_inst.args.len() != orig_args {
                     verification.issues.push(format!(
                         "Instruction '{}': arg count mismatch {} vs {}",
-                        orig_name, gen_inst.args.len(), orig_args
+                        orig_name,
+                        gen_inst.args.len(),
+                        orig_args
                     ));
                     matches = false;
                 }
@@ -371,7 +402,8 @@ pub fn verify_idl(generated: &Idl, original_path: &std::path::Path) -> anyhow::R
 
         for (i, orig_acc) in orig_accounts.iter().enumerate() {
             let orig_name = orig_acc.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let orig_fields = orig_acc.get("type")
+            let orig_fields = orig_acc
+                .get("type")
                 .and_then(|t| t.get("fields"))
                 .and_then(|f| f.as_array())
                 .map(|a| a.len())
@@ -391,7 +423,9 @@ pub fn verify_idl(generated: &Idl, original_path: &std::path::Path) -> anyhow::R
                 if gen_acc.ty.fields.len() != orig_fields {
                     verification.issues.push(format!(
                         "Account '{}': field count mismatch {} vs {}",
-                        orig_name, gen_acc.ty.fields.len(), orig_fields
+                        orig_name,
+                        gen_acc.ty.fields.len(),
+                        orig_fields
                     ));
                     matches = false;
                 }
@@ -421,7 +455,8 @@ pub fn verify_idl(generated: &Idl, original_path: &std::path::Path) -> anyhow::R
             verification.is_compatible = false;
             verification.issues.push(format!(
                 "Error count mismatch: {} vs {}",
-                generated.errors.len(), orig_errors.len()
+                generated.errors.len(),
+                orig_errors.len()
             ));
         }
     }
@@ -465,12 +500,10 @@ mod tests {
         }
 
         match rust_type_to_idl_type("Option<u64>") {
-            IdlType::Option { option } => {
-                match *option {
-                    IdlType::Simple(s) => assert_eq!(s, "u64"),
-                    _ => panic!("Expected simple u64 inside Option"),
-                }
-            }
+            IdlType::Option { option } => match *option {
+                IdlType::Simple(s) => assert_eq!(s, "u64"),
+                _ => panic!("Expected simple u64 inside Option"),
+            },
             _ => panic!("Expected Option type"),
         }
     }

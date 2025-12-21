@@ -1,13 +1,17 @@
 //! Emit Pinocchio code from IR
 
 use anyhow::Result;
-use std::path::Path;
 use std::fs;
+use std::path::Path;
 
 use crate::ir::*;
 use crate::parser::SourceExtras;
 
-pub fn emit_with_extras(program: &PinocchioProgram, output_dir: &Path, extras: Option<&SourceExtras>) -> Result<()> {
+pub fn emit_with_extras(
+    program: &PinocchioProgram,
+    output_dir: &Path,
+    extras: Option<&SourceExtras>,
+) -> Result<()> {
     fs::create_dir_all(output_dir)?;
 
     // Emit Cargo.toml
@@ -68,10 +72,7 @@ fn emit_helpers_rs(extras: &SourceExtras, src_dir: &Path) -> Result<()> {
     if !extras.constants.is_empty() {
         content.push_str("// Constants\n");
         for c in &extras.constants {
-            content.push_str(&format!(
-                "pub const {}: {} = {};\n",
-                c.name, c.ty, c.value
-            ));
+            content.push_str(&format!("pub const {}: {} = {};\n", c.name, c.ty, c.value));
         }
         content.push_str("\n");
     }
@@ -90,18 +91,24 @@ fn emit_helpers_rs(extras: &SourceExtras, src_dir: &Path) -> Result<()> {
 
         content.push_str("/// Get token account balance from account info\n");
         content.push_str("#[inline(always)]\n");
-        content.push_str("pub fn get_token_balance(account: &AccountInfo) -> Result<u64, ProgramError> {\n");
+        content.push_str(
+            "pub fn get_token_balance(account: &AccountInfo) -> Result<u64, ProgramError> {\n",
+        );
         content.push_str("    let data = account.try_borrow_data()?;\n");
         content.push_str("    if data.len() < 72 {\n");
         content.push_str("        return Err(ProgramError::InvalidAccountData);\n");
         content.push_str("    }\n");
-        content.push_str("    // Token account amount is at offset 64 (after mint and owner pubkeys)\n");
+        content.push_str(
+            "    // Token account amount is at offset 64 (after mint and owner pubkeys)\n",
+        );
         content.push_str("    Ok(u64::from_le_bytes(data[64..72].try_into().unwrap()))\n");
         content.push_str("}\n\n");
 
         content.push_str("/// Get token account mint from account info\n");
         content.push_str("#[inline(always)]\n");
-        content.push_str("pub fn get_token_mint(account: &AccountInfo) -> Result<Pubkey, ProgramError> {\n");
+        content.push_str(
+            "pub fn get_token_mint(account: &AccountInfo) -> Result<Pubkey, ProgramError> {\n",
+        );
         content.push_str("    let data = account.try_borrow_data()?;\n");
         content.push_str("    if data.len() < 32 {\n");
         content.push_str("        return Err(ProgramError::InvalidAccountData);\n");
@@ -113,7 +120,9 @@ fn emit_helpers_rs(extras: &SourceExtras, src_dir: &Path) -> Result<()> {
 
         content.push_str("/// Get token account owner from account info\n");
         content.push_str("#[inline(always)]\n");
-        content.push_str("pub fn get_token_owner(account: &AccountInfo) -> Result<Pubkey, ProgramError> {\n");
+        content.push_str(
+            "pub fn get_token_owner(account: &AccountInfo) -> Result<Pubkey, ProgramError> {\n",
+        );
         content.push_str("    let data = account.try_borrow_data()?;\n");
         content.push_str("    if data.len() < 64 {\n");
         content.push_str("        return Err(ProgramError::InvalidAccountData);\n");
@@ -139,7 +148,9 @@ fn emit_helpers_rs(extras: &SourceExtras, src_dir: &Path) -> Result<()> {
         content.push_str("    use pinocchio::syscalls::sol_sha256;\n");
         content.push_str("    let mut hash_result = [0u8; 32];\n");
         content.push_str("    unsafe {\n");
-        content.push_str("        sol_sha256(data.as_ptr(), data.len() as u64, hash_result.as_mut_ptr());\n");
+        content.push_str(
+            "        sol_sha256(data.as_ptr(), data.len() as u64, hash_result.as_mut_ptr());\n",
+        );
         content.push_str("    }\n");
         content.push_str("    Hash { bytes: hash_result }\n");
         content.push_str("}\n\n");
@@ -305,7 +316,8 @@ fn has_comma_outside_strings(s: &str) -> bool {
 }
 
 fn emit_cargo_toml(program: &PinocchioProgram, output_dir: &Path) -> Result<()> {
-    let content = format!(r#"[package]
+    let content = format!(
+        r#"[package]
 name = "{}"
 version = "0.1.0"
 edition = "2021"
@@ -333,7 +345,11 @@ debug-assertions = false
 incremental = false
 "#,
         program.name,
-        if program.config.no_alloc { "" } else { "pinocchio-token = \"0.3\"" }
+        if program.config.no_alloc {
+            ""
+        } else {
+            "pinocchio-token = \"0.3\""
+        }
     );
 
     fs::write(output_dir.join("Cargo.toml"), content)?;
@@ -371,10 +387,7 @@ fn emit_lib_rs(program: &PinocchioProgram, src_dir: &Path, has_helpers: bool) ->
 
     // Program ID as bytes (Pinocchio uses [u8; 32])
     if let Some(id) = &program.program_id {
-        content.push_str(&format!(
-            "/// Program ID: {}\n",
-            id
-        ));
+        content.push_str(&format!("/// Program ID: {}\n", id));
         content.push_str("pub const ID: [u8; 32] = [\n");
         // Decode base58 to bytes
         if let Ok(bytes) = bs58_decode(id) {
@@ -405,7 +418,9 @@ fn emit_lib_rs(program: &PinocchioProgram, src_dir: &Path, has_helpers: bool) ->
     // Discriminator constants
     content.push_str("// Instruction discriminators (Anchor-compatible)\n");
     for inst in &program.instructions {
-        let disc_bytes: Vec<String> = inst.discriminator.iter()
+        let disc_bytes: Vec<String> = inst
+            .discriminator
+            .iter()
             .map(|b| format!("{:#04x}", b))
             .collect();
         content.push_str(&format!(
@@ -466,8 +481,11 @@ fn bs58_decode(s: &str) -> Result<Vec<u8>> {
     let mut scratch: Vec<u64> = vec![0; 44]; // Enough for 32 bytes
 
     for c in s.bytes() {
-        let mut val = ALPHABET.iter().position(|&x| x == c)
-            .ok_or_else(|| anyhow::anyhow!("Invalid base58 character"))? as u64;
+        let mut val = ALPHABET
+            .iter()
+            .position(|&x| x == c)
+            .ok_or_else(|| anyhow::anyhow!("Invalid base58 character"))?
+            as u64;
 
         for digit in scratch.iter_mut() {
             val += *digit * 58;
@@ -493,7 +511,8 @@ fn bs58_decode(s: &str) -> Result<Vec<u8>> {
 fn emit_state_rs(program: &PinocchioProgram, src_dir: &Path) -> Result<()> {
     let mut content = String::new();
 
-    content.push_str("use pinocchio::{account_info::AccountInfo, program_error::ProgramError};\n\n");
+    content
+        .push_str("use pinocchio::{account_info::AccountInfo, program_error::ProgramError};\n\n");
 
     for state in &program.state_structs {
         // Struct definition
@@ -513,7 +532,9 @@ fn emit_state_rs(program: &PinocchioProgram, src_dir: &Path) -> Result<()> {
 
         // from_account_info
         content.push_str("    #[inline(always)]\n");
-        content.push_str("    pub fn from_account_info(info: &AccountInfo) -> Result<&Self, ProgramError> {\n");
+        content.push_str(
+            "    pub fn from_account_info(info: &AccountInfo) -> Result<&Self, ProgramError> {\n",
+        );
         content.push_str("        let data = info.try_borrow_data()?;\n");
         content.push_str(&format!("        if data.len() < 8 + Self::SIZE {{\n"));
         content.push_str("            return Err(ProgramError::InvalidAccountData);\n");
@@ -608,8 +629,11 @@ fn emit_instruction(
     content.push_str("};\n");
 
     // Add pinocchio_token if the instruction uses token operations
-    if inst.body.contains("token::") || inst.body.contains("Transfer") ||
-       inst.body.contains("mint_to") || inst.body.contains("burn") {
+    if inst.body.contains("token::")
+        || inst.body.contains("Transfer")
+        || inst.body.contains("mint_to")
+        || inst.body.contains("burn")
+    {
         content.push_str("use pinocchio_token::instructions::{Transfer, MintTo, Burn};\n");
     }
     content.push_str("\n");
@@ -724,19 +748,27 @@ fn emit_instruction(
                     acc.name
                 ));
             }
-            Validation::PdaCheck { account_idx, seeds, bump } => {
+            Validation::PdaCheck {
+                account_idx,
+                seeds,
+                bump,
+            } => {
                 if !has_validations {
                     content.push_str("    // Validate accounts\n");
                     has_validations = true;
                 }
                 let acc = &inst.accounts[*account_idx];
                 // Generate actual PDA validation code
-                let mut seeds_code: Vec<String> = seeds.iter()
+                let mut seeds_code: Vec<String> = seeds
+                    .iter()
                     .map(|s| {
                         if s.starts_with("b\"") {
                             format!("{}.as_ref()", s)
                         } else if s.contains(".key()") {
-                            let acc_name = s.replace(".key()", "").replace(".as_ref()", "").replace(" ", "");
+                            let acc_name = s
+                                .replace(".key()", "")
+                                .replace(".as_ref()", "")
+                                .replace(" ", "");
                             format!("{}.key().as_ref()", acc_name)
                         } else if s.contains("as_ref") {
                             s.clone()
@@ -752,10 +784,7 @@ fn emit_instruction(
                 }
 
                 // Generate the PDA verification code
-                content.push_str(&format!(
-                    "    // Verify PDA for {}\n",
-                    acc.name
-                ));
+                content.push_str(&format!("    // Verify PDA for {}\n", acc.name));
 
                 if bump.is_some() {
                     // If bump is provided, just derive PDA with it
@@ -763,10 +792,7 @@ fn emit_instruction(
                         "    let expected_{} = pinocchio::pubkey::create_program_address(\n",
                         acc.name
                     ));
-                    content.push_str(&format!(
-                        "        &[{}],\n",
-                        seeds_code.join(", ")
-                    ));
+                    content.push_str(&format!("        &[{}],\n", seeds_code.join(", ")));
                     content.push_str("        program_id,\n");
                     content.push_str("    )?;\n");
                 } else {
@@ -775,10 +801,7 @@ fn emit_instruction(
                         "    let (expected_{}, _bump) = pinocchio::pubkey::find_program_address(\n",
                         acc.name
                     ));
-                    content.push_str(&format!(
-                        "        &[{}],\n",
-                        seeds_code.join(", ")
-                    ));
+                    content.push_str(&format!("        &[{}],\n", seeds_code.join(", ")));
                     content.push_str("        program_id,\n");
                     content.push_str("    );\n");
                 }
@@ -805,7 +828,9 @@ fn emit_instruction(
     }
 
     // Parse remaining instruction arguments (skip those already parsed for PDA seeds)
-    let remaining_args: Vec<_> = inst.args.iter()
+    let remaining_args: Vec<_> = inst
+        .args
+        .iter()
         .filter(|arg| !args_used_in_pda.contains(&arg.name))
         .collect();
 
@@ -825,8 +850,8 @@ fn emit_instruction(
     }
 
     // Add transformed body or placeholder
-    let body_ends_with_ok = inst.body.trim().ends_with("Ok (())")
-        || inst.body.trim().ends_with("Ok(())");
+    let body_ends_with_ok =
+        inst.body.trim().ends_with("Ok (())") || inst.body.trim().ends_with("Ok(())");
 
     if !inst.body.is_empty() && inst.body != "{}" {
         content.push_str("    // Transformed instruction logic\n");

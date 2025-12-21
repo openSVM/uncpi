@@ -27,8 +27,12 @@ pub fn token_transfer_cpi(
         ]],
     )?;
     // Transfer amount: {}"#,
-            from_account, to_account, authority,
-            from_account, to_account, authority,
+            from_account,
+            to_account,
+            authority,
+            from_account,
+            to_account,
+            authority,
             seeds_code.join("\n"),
             amount
         )
@@ -41,9 +45,7 @@ pub fn token_transfer_cpi(
         authority: {}.key(),
     }}.invoke(&[{}.clone(), {}.clone(), {}.clone()])?;
     // Transfer amount: {}"#,
-            from_account, to_account, authority,
-            from_account, to_account, authority,
-            amount
+            from_account, to_account, authority, from_account, to_account, authority, amount
         )
     }
 }
@@ -73,8 +75,12 @@ pub fn token_mint_to_cpi(
         ]],
     )?;
     // Mint amount: {}"#,
-            mint_account, to_account, authority,
-            mint_account, to_account, authority,
+            mint_account,
+            to_account,
+            authority,
+            mint_account,
+            to_account,
+            authority,
             seeds_code.join("\n"),
             amount
         )
@@ -87,9 +93,7 @@ pub fn token_mint_to_cpi(
         mint_authority: {}.key(),
     }}.invoke(&[{}.clone(), {}.clone(), {}.clone()])?;
     // Mint amount: {}"#,
-            mint_account, to_account, authority,
-            mint_account, to_account, authority,
-            amount
+            mint_account, to_account, authority, mint_account, to_account, authority, amount
         )
     }
 }
@@ -109,26 +113,19 @@ pub fn token_burn_cpi(
         authority: {}.key(),
     }}.invoke(&[{}.clone(), {}.clone(), {}.clone()])?;
     // Burn amount: {}"#,
-        from_account, mint_account, authority,
-        from_account, mint_account, authority,
-        amount
+        from_account, mint_account, authority, from_account, mint_account, authority, amount
     )
 }
 
 /// Generate Pinocchio SOL transfer (direct lamport manipulation)
 /// Used when we want to generate inline SOL transfers instead of system_program CPI
 /// This is the most gas-efficient way to transfer SOL in Pinocchio
-pub fn sol_transfer_cpi(
-    from_account: &str,
-    to_account: &str,
-    amount: &str,
-) -> String {
+pub fn sol_transfer_cpi(from_account: &str, to_account: &str, amount: &str) -> String {
     format!(
         r#"// SOL transfer
     **{}.try_borrow_mut_lamports()? -= {};
     **{}.try_borrow_mut_lamports()? += {};"#,
-        from_account, amount,
-        to_account, amount
+        from_account, amount, to_account, amount
     )
 }
 
@@ -137,9 +134,7 @@ pub fn sol_transfer_cpi(
 pub fn state_deserialize_read(state_type: &str, account_name: &str) -> String {
     format!(
         "let {}_state = {}::from_account_info({})?;",
-        account_name,
-        state_type,
-        account_name
+        account_name, state_type, account_name
     )
 }
 
@@ -149,16 +144,12 @@ pub fn state_deserialize_write(state_type: &str, account_name: &str, needs_mut: 
     if needs_mut {
         format!(
             "let mut {}_state = {}::from_account_info_mut({})?;",
-            account_name,
-            state_type,
-            account_name
+            account_name, state_type, account_name
         )
     } else {
         format!(
             "let {}_state = {}::from_account_info_mut({})?;",
-            account_name,
-            state_type,
-            account_name
+            account_name, state_type, account_name
         )
     }
 }

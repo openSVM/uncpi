@@ -1,9 +1,9 @@
 //! Parse Anchor programs into IR
 
 use anyhow::{Context, Result};
-use std::path::Path;
-use syn::{parse_file, Attribute, Item, ItemMod, ItemStruct, Field, Type};
 use quote::ToTokens;
+use std::path::Path;
+use syn::{parse_file, Attribute, Field, Item, ItemMod, ItemStruct, Type};
 
 use crate::ir::*;
 
@@ -30,19 +30,18 @@ pub struct HelperFunction {
 }
 
 pub fn parse_anchor_file(path: &Path) -> Result<AnchorProgram> {
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read {:?}", path))?;
+    let content =
+        std::fs::read_to_string(path).with_context(|| format!("Failed to read {:?}", path))?;
 
     parse_anchor_source(&content)
 }
 
 /// Parse source and extract constants and helper functions
 pub fn parse_extras(path: &Path) -> Result<SourceExtras> {
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read {:?}", path))?;
+    let content =
+        std::fs::read_to_string(path).with_context(|| format!("Failed to read {:?}", path))?;
 
-    let file = parse_file(&content)
-        .with_context(|| "Failed to parse Rust source")?;
+    let file = parse_file(&content).with_context(|| "Failed to parse Rust source")?;
 
     let mut extras = SourceExtras::default();
 
@@ -73,8 +72,7 @@ pub fn parse_extras(path: &Path) -> Result<SourceExtras> {
 }
 
 pub fn parse_anchor_source(source: &str) -> Result<AnchorProgram> {
-    let file = parse_file(source)
-        .with_context(|| "Failed to parse Rust source")?;
+    let file = parse_file(source).with_context(|| "Failed to parse Rust source")?;
 
     let mut program = AnchorProgram {
         name: String::new(),
@@ -163,8 +161,13 @@ fn parse_instruction(func: &syn::ItemFn) -> Result<AnchorInstruction> {
                     for seg in &type_path.path.segments {
                         if seg.ident == "Context" {
                             if let syn::PathArguments::AngleBracketed(args) = &seg.arguments {
-                                if let Some(syn::GenericArgument::Type(Type::Path(inner))) = args.args.first() {
-                                    accounts_struct = inner.path.segments.last()
+                                if let Some(syn::GenericArgument::Type(Type::Path(inner))) =
+                                    args.args.first()
+                                {
+                                    accounts_struct = inner
+                                        .path
+                                        .segments
+                                        .last()
                                         .map(|s| s.ident.to_string())
                                         .unwrap_or_default();
                                 }
@@ -211,14 +214,20 @@ fn parse_account_struct(s: &ItemStruct) -> Result<AnchorAccountStruct> {
 }
 
 fn parse_anchor_account(field: &Field) -> Result<AnchorAccount> {
-    let name = field.ident.as_ref()
+    let name = field
+        .ident
+        .as_ref()
         .map(|i| i.to_string())
         .unwrap_or_default();
 
     let ty = parse_account_type(&field.ty);
     let constraints = parse_account_constraints(&field.attrs);
 
-    Ok(AnchorAccount { name, ty, constraints })
+    Ok(AnchorAccount {
+        name,
+        ty,
+        constraints,
+    })
 }
 
 fn parse_account_type(ty: &Type) -> AccountType {
@@ -243,7 +252,9 @@ fn parse_account_type(ty: &Type) -> AccountType {
     } else if ty_str.starts_with("Box<") {
         let inner_str = ty_str.trim_start_matches("Box<").trim_end_matches('>');
         let inner = parse_account_type_str(inner_str);
-        AccountType::Box { inner: Box::new(inner) }
+        AccountType::Box {
+            inner: Box::new(inner),
+        }
     } else if ty_str.contains("Account") {
         let inner = extract_generic(&ty_str, "Account");
         AccountType::Account { inner }
@@ -261,7 +272,9 @@ fn parse_account_type_str(s: &str) -> AccountType {
     } else if s.contains("TokenAccount") {
         AccountType::TokenAccount
     } else {
-        AccountType::Account { inner: s.to_string() }
+        AccountType::Account {
+            inner: s.to_string(),
+        }
     }
 }
 
@@ -350,7 +363,9 @@ fn parse_state_struct(s: &ItemStruct) -> Result<AnchorStateStruct> {
 
     if let syn::Fields::Named(named) = &s.fields {
         for field in &named.named {
-            let field_name = field.ident.as_ref()
+            let field_name = field
+                .ident
+                .as_ref()
                 .map(|i| i.to_string())
                 .unwrap_or_default();
             let field_ty = type_to_string(&field.ty);
@@ -427,7 +442,8 @@ fn extract_value(s: &str, key: &str) -> String {
         let rest = &s[idx + key.len()..];
         if let Some(eq_idx) = rest.find('=') {
             let value_start = rest[eq_idx + 1..].trim_start();
-            let end = value_start.find(|c| c == ',' || c == ')' || c == '@')
+            let end = value_start
+                .find(|c| c == ',' || c == ')' || c == '@')
                 .unwrap_or(value_start.len());
             return value_start[..end].trim().to_string();
         }
@@ -437,7 +453,11 @@ fn extract_value(s: &str, key: &str) -> String {
 
 fn extract_value_optional(s: &str, key: &str) -> Option<String> {
     let val = extract_value(s, key);
-    if val.is_empty() { None } else { Some(val) }
+    if val.is_empty() {
+        None
+    } else {
+        Some(val)
+    }
 }
 
 fn extract_seeds(s: &str) -> Vec<String> {
@@ -446,7 +466,8 @@ fn extract_seeds(s: &str) -> Vec<String> {
             let rest = &s[start + bracket_start..];
             if let Some(bracket_end) = rest.find(']') {
                 let inner = &rest[1..bracket_end];
-                return inner.split(',')
+                return inner
+                    .split(',')
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
@@ -471,7 +492,10 @@ fn extract_has_one(s: &str) -> (String, Option<String>) {
     let val = extract_value(s, "has_one");
     if val.contains('@') {
         let parts: Vec<&str> = val.split('@').collect();
-        (parts[0].trim().to_string(), Some(parts[1].trim().to_string()))
+        (
+            parts[0].trim().to_string(),
+            Some(parts[1].trim().to_string()),
+        )
     } else {
         (val, None)
     }

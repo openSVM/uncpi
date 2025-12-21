@@ -1,8 +1,8 @@
 //! Transform Anchor IR to Pinocchio IR
 
-use anyhow::Result;
-use crate::ir::*;
 use crate::cpi_helpers;
+use crate::ir::*;
+use anyhow::Result;
 
 pub struct Config {
     pub no_alloc: bool,
@@ -10,7 +10,7 @@ pub struct Config {
     pub inline_cpi: bool,
     pub anchor_compat: bool,
     pub no_logs: bool,
-    pub unsafe_math: bool,  // Use unchecked math for smaller binary
+    pub unsafe_math: bool, // Use unchecked math for smaller binary
 }
 
 pub fn transform(
@@ -18,11 +18,15 @@ pub fn transform(
     analysis: &ProgramAnalysis,
     config: &Config,
 ) -> Result<PinocchioProgram> {
-    let instructions = anchor.instructions.iter()
+    let instructions = anchor
+        .instructions
+        .iter()
         .map(|inst| transform_instruction(inst, anchor, analysis, config))
         .collect::<Result<Vec<_>>>()?;
 
-    let state_structs = anchor.state_structs.iter()
+    let state_structs = anchor
+        .state_structs
+        .iter()
         .map(|state| transform_state(state, analysis))
         .collect::<Result<Vec<_>>>()?;
 
@@ -49,7 +53,9 @@ fn transform_instruction(
     config: &Config,
 ) -> Result<PinocchioInstruction> {
     // Find the corresponding account struct
-    let account_struct = program.account_structs.iter()
+    let account_struct = program
+        .account_structs
+        .iter()
         .find(|s| s.name == anchor_inst.accounts_struct)
         .cloned()
         .unwrap_or_else(|| AnchorAccountStruct {
@@ -68,7 +74,9 @@ fn transform_instruction(
     };
 
     // Transform accounts
-    let accounts: Vec<PinocchioAccount> = account_struct.accounts.iter()
+    let accounts: Vec<PinocchioAccount> = account_struct
+        .accounts
+        .iter()
         .enumerate()
         .map(|(idx, acc)| transform_account(acc, idx, analysis))
         .collect();
@@ -95,10 +103,14 @@ fn transform_account(
     analysis: &ProgramAnalysis,
 ) -> PinocchioAccount {
     let is_signer = matches!(anchor_acc.ty, AccountType::Signer);
-    let is_writable = anchor_acc.constraints.iter()
+    let is_writable = anchor_acc
+        .constraints
+        .iter()
         .any(|c| matches!(c, AccountConstraint::Mut | AccountConstraint::Init { .. }));
 
-    let pda_info = analysis.pdas.iter()
+    let pda_info = analysis
+        .pdas
+        .iter()
         .find(|p| p.account_name == anchor_acc.name);
 
     PinocchioAccount {
@@ -111,9 +123,7 @@ fn transform_account(
     }
 }
 
-fn generate_validations(
-    account_struct: &AnchorAccountStruct,
-) -> Vec<Validation> {
+fn generate_validations(account_struct: &AnchorAccountStruct) -> Vec<Validation> {
     let mut validations = Vec::new();
 
     for (idx, account) in account_struct.accounts.iter().enumerate() {
@@ -123,14 +133,20 @@ fn generate_validations(
         }
 
         // Writable check for mut accounts
-        if account.constraints.iter().any(|c| matches!(c, AccountConstraint::Mut)) {
+        if account
+            .constraints
+            .iter()
+            .any(|c| matches!(c, AccountConstraint::Mut))
+        {
             validations.push(Validation::IsWritable { account_idx: idx });
         }
 
         // PDA check
         for constraint in &account.constraints {
             if let AccountConstraint::Seeds(seeds) = constraint {
-                let bump = account.constraints.iter()
+                let bump = account
+                    .constraints
+                    .iter()
                     .find_map(|c| match c {
                         AccountConstraint::Bump(b) => Some(b.clone()),
                         _ => None,
@@ -171,7 +187,7 @@ fn transform_constraint_expr(expr: &str, accounts: &[AnchorAccount]) -> String {
         // Replace acc.key() with accounts[idx].key()
         result = result.replace(
             &format!("{}.key()", acc.name),
-            &format!("accounts[{}].key()", idx)
+            &format!("accounts[{}].key()", idx),
         );
 
         // Replace acc.field with dereferenced access
@@ -187,7 +203,7 @@ fn transform_body(body: &str, accounts: &[PinocchioAccount], config: &Config) ->
     // Strip outer braces if present
     let trimmed = result.trim();
     if trimmed.starts_with('{') && trimmed.ends_with('}') {
-        result = trimmed[1..trimmed.len()-1].to_string();
+        result = trimmed[1..trimmed.len() - 1].to_string();
     }
 
     // Replace ctx.accounts.X with actual account variables
@@ -217,11 +233,11 @@ fn transform_body(body: &str, accounts: &[PinocchioAccount], config: &Config) ->
             // Handle various spacing patterns
             result = result.replace(
                 &format!("ctx . bumps . {}", acc.name),
-                &format!("{}_bump", acc.name)
+                &format!("{}_bump", acc.name),
             );
             result = result.replace(
                 &format!("ctx.bumps.{}", acc.name),
-                &format!("{}_bump", acc.name)
+                &format!("{}_bump", acc.name),
             );
         }
     }
@@ -263,11 +279,11 @@ fn transform_body(body: &str, accounts: &[PinocchioAccount], config: &Config) ->
     // Handle both spaced and non-spaced versions
     result = result.replace(
         "anchor_lang::solana_program::hash::hash",
-        "crate::helpers::compute_hash"
+        "crate::helpers::compute_hash",
     );
     result = result.replace(
         "anchor_lang :: solana_program :: hash :: hash",
-        "crate::helpers::compute_hash"
+        "crate::helpers::compute_hash",
     );
 
     // Replace program-specific error enum names with generic Error
@@ -345,15 +361,18 @@ fn replace_vec_with_array(body: &str) -> String {
     let mut result = body.to_string();
 
     // Pattern: let mut data = Vec :: with_capacity ( 48 ) ; (with arbitrary spacing)
-    let vec_pattern = Regex::new(r"let\s+mut\s+(\w+)\s*=\s*Vec\s*::\s*with_capacity\s*\(\s*(\d+)\s*\)\s*;").unwrap();
+    let vec_pattern =
+        Regex::new(r"let\s+mut\s+(\w+)\s*=\s*Vec\s*::\s*with_capacity\s*\(\s*(\d+)\s*\)\s*;")
+            .unwrap();
 
     // First pass: extract info
-    let captures_data: Option<(String, usize, String)> = vec_pattern.captures(&result).map(|caps| {
-        let var_name = caps.get(1).unwrap().as_str().to_string();
-        let capacity: usize = caps.get(2).unwrap().as_str().parse().unwrap_or(48);
-        let old_decl = caps.get(0).unwrap().as_str().to_string();
-        (var_name, capacity, old_decl)
-    });
+    let captures_data: Option<(String, usize, String)> =
+        vec_pattern.captures(&result).map(|caps| {
+            let var_name = caps.get(1).unwrap().as_str().to_string();
+            let capacity: usize = caps.get(2).unwrap().as_str().parse().unwrap_or(48);
+            let old_decl = caps.get(0).unwrap().as_str().to_string();
+            (var_name, capacity, old_decl)
+        });
 
     if let Some((var_name, _capacity, old_decl)) = captures_data {
         // For hash computation: 8 (u64) + 8 (i64) + 32 (salt) = 48 bytes
@@ -370,21 +389,43 @@ fn replace_vec_with_array(body: &str) -> String {
             r"{}\s*\.\s*extend_from_slice\s*\(\s*&\s*target_amplification\s*\.\s*to_le_bytes\s*\(\s*\)\s*\)\s*;",
             regex::escape(&var_name)
         )).unwrap();
-        result = pattern1.replace(&result, format!("{}[0..8].copy_from_slice(&target_amplification.to_le_bytes());", var_name)).to_string();
+        result = pattern1
+            .replace(
+                &result,
+                format!(
+                    "{}[0..8].copy_from_slice(&target_amplification.to_le_bytes());",
+                    var_name
+                ),
+            )
+            .to_string();
 
         // Second: ramp_duration.to_le_bytes() -> offset 8..16
         let pattern2 = Regex::new(&format!(
             r"{}\s*\.\s*extend_from_slice\s*\(\s*&\s*ramp_duration\s*\.\s*to_le_bytes\s*\(\s*\)\s*\)\s*;",
             regex::escape(&var_name)
         )).unwrap();
-        result = pattern2.replace(&result, format!("{}[8..16].copy_from_slice(&ramp_duration.to_le_bytes());", var_name)).to_string();
+        result = pattern2
+            .replace(
+                &result,
+                format!(
+                    "{}[8..16].copy_from_slice(&ramp_duration.to_le_bytes());",
+                    var_name
+                ),
+            )
+            .to_string();
 
         // Third: salt -> offset 16..48
         let pattern3 = Regex::new(&format!(
             r"{}\s*\.\s*extend_from_slice\s*\(\s*&\s*salt\s*\)\s*;",
             regex::escape(&var_name)
-        )).unwrap();
-        result = pattern3.replace(&result, format!("{}[16..48].copy_from_slice(&salt);", var_name)).to_string();
+        ))
+        .unwrap();
+        result = pattern3
+            .replace(
+                &result,
+                format!("{}[16..48].copy_from_slice(&salt);", var_name),
+            )
+            .to_string();
     }
 
     result
@@ -465,7 +506,8 @@ fn transform_state_access_final(body: &str) -> String {
 
         // Then add deserialization block at the start
         // Use `let mut` only if the state is mutated
-        let deser_lines: Vec<String> = needs_deser.iter()
+        let deser_lines: Vec<String> = needs_deser
+            .iter()
             .map(|(acc, ty)| {
                 let state_var = format!("{}_state", acc);
                 // Check if state is mutated
@@ -487,20 +529,54 @@ fn transform_state_access_final(body: &str) -> String {
 
 fn has_state_field_access(body: &str, acc_name: &str) -> bool {
     let state_fields = [
-        "authority", "bags_mint", "pump_mint", "bags_vault", "pump_vault",
-        "lp_mint", "bags_balance", "pump_balance", "lp_supply", "bump",
-        "paused", "swap_fee_bps", "admin_fee_percent", "amplification",
-        "pending_authority", "authority_transfer_time", "admin_fees_bags",
-        "admin_fees_pump", "total_volume_bags", "total_volume_pump",
-        "ramp_start_time", "ramp_stop_time", "initial_amplification",
-        "target_amplification", "amp_commit_hash", "amp_commit_time",
-        "bags_vault_bump", "pump_vault_bump", "lp_mint_bump",
-        "total_staked", "accumulated_reward_per_share", "acc_reward_per_share",
-        "last_update_time", "reward_per_second", "start_time", "end_time",
-        "total_rewards", "distributed_rewards", "staked_amount", "reward_debt",
-        "pending_rewards", "lp_staked", "owner", "pending_amp_commit",
+        "authority",
+        "bags_mint",
+        "pump_mint",
+        "bags_vault",
+        "pump_vault",
+        "lp_mint",
+        "bags_balance",
+        "pump_balance",
+        "lp_supply",
+        "bump",
+        "paused",
+        "swap_fee_bps",
+        "admin_fee_percent",
+        "amplification",
+        "pending_authority",
+        "authority_transfer_time",
+        "admin_fees_bags",
+        "admin_fees_pump",
+        "total_volume_bags",
+        "total_volume_pump",
+        "ramp_start_time",
+        "ramp_stop_time",
+        "initial_amplification",
+        "target_amplification",
+        "amp_commit_hash",
+        "amp_commit_time",
+        "bags_vault_bump",
+        "pump_vault_bump",
+        "lp_mint_bump",
+        "total_staked",
+        "accumulated_reward_per_share",
+        "acc_reward_per_share",
+        "last_update_time",
+        "reward_per_second",
+        "start_time",
+        "end_time",
+        "total_rewards",
+        "distributed_rewards",
+        "staked_amount",
+        "reward_debt",
+        "pending_rewards",
+        "lp_staked",
+        "owner",
+        "pending_amp_commit",
         // Fields for farming_period state
-        "pool", "reward_mint", "farming_period",
+        "pool",
+        "reward_mint",
+        "farming_period",
     ];
 
     for field in &state_fields {
@@ -524,15 +600,19 @@ fn is_state_mutated(body: &str, state_var: &str) -> bool {
     for line in body.lines() {
         let trimmed = line.trim();
         // Check if line contains state_var. followed by field =
-        if trimmed.contains(&assignment_pattern) && trimmed.contains(" = ")
-            && !trimmed.contains(" == ") && !trimmed.contains(" != ") {
+        if trimmed.contains(&assignment_pattern)
+            && trimmed.contains(" = ")
+            && !trimmed.contains(" == ")
+            && !trimmed.contains(" != ")
+        {
             // Make sure it's an assignment, not just reading
             if let Some(dot_pos) = trimmed.find(&assignment_pattern) {
                 let after_dot = &trimmed[dot_pos + assignment_pattern.len()..];
                 // Check if there's a field name followed by =
                 if let Some(eq_pos) = after_dot.find(" = ") {
                     // Make sure it's not == or !=
-                    if !after_dot[..eq_pos].is_empty() && !after_dot[eq_pos+3..].starts_with('=') {
+                    if !after_dot[..eq_pos].is_empty() && !after_dot[eq_pos + 3..].starts_with('=')
+                    {
                         return true;
                     }
                 }
@@ -552,20 +632,54 @@ fn replace_state_fields(body: &str, acc_name: &str) -> String {
     let mut result = body.to_string();
 
     let state_fields = [
-        "authority", "bags_mint", "pump_mint", "bags_vault", "pump_vault",
-        "lp_mint", "bags_balance", "pump_balance", "lp_supply", "bump",
-        "paused", "swap_fee_bps", "admin_fee_percent", "amplification",
-        "pending_authority", "authority_transfer_time", "admin_fees_bags",
-        "admin_fees_pump", "total_volume_bags", "total_volume_pump",
-        "ramp_start_time", "ramp_stop_time", "initial_amplification",
-        "target_amplification", "amp_commit_hash", "amp_commit_time",
-        "bags_vault_bump", "pump_vault_bump", "lp_mint_bump",
-        "total_staked", "accumulated_reward_per_share", "acc_reward_per_share",
-        "last_update_time", "reward_per_second", "start_time", "end_time",
-        "total_rewards", "distributed_rewards", "staked_amount", "reward_debt",
-        "pending_rewards", "lp_staked", "owner", "pending_amp_commit",
+        "authority",
+        "bags_mint",
+        "pump_mint",
+        "bags_vault",
+        "pump_vault",
+        "lp_mint",
+        "bags_balance",
+        "pump_balance",
+        "lp_supply",
+        "bump",
+        "paused",
+        "swap_fee_bps",
+        "admin_fee_percent",
+        "amplification",
+        "pending_authority",
+        "authority_transfer_time",
+        "admin_fees_bags",
+        "admin_fees_pump",
+        "total_volume_bags",
+        "total_volume_pump",
+        "ramp_start_time",
+        "ramp_stop_time",
+        "initial_amplification",
+        "target_amplification",
+        "amp_commit_hash",
+        "amp_commit_time",
+        "bags_vault_bump",
+        "pump_vault_bump",
+        "lp_mint_bump",
+        "total_staked",
+        "accumulated_reward_per_share",
+        "acc_reward_per_share",
+        "last_update_time",
+        "reward_per_second",
+        "start_time",
+        "end_time",
+        "total_rewards",
+        "distributed_rewards",
+        "staked_amount",
+        "reward_debt",
+        "pending_rewards",
+        "lp_staked",
+        "owner",
+        "pending_amp_commit",
         // Fields for farming_period and user_position state
-        "pool", "reward_mint", "farming_period",
+        "pool",
+        "reward_mint",
+        "farming_period",
     ];
 
     for field in &state_fields {
@@ -576,22 +690,55 @@ fn replace_state_fields(body: &str, acc_name: &str) -> String {
 
     // Also replace references like &pool in function calls with &pool_state
     // Pattern: (& pool) or (&pool) when pool is a state account
-    result = result.replace(&format!("(& {})", acc_name), &format!("(&{}_state)", acc_name));
-    result = result.replace(&format!("(&{})", acc_name), &format!("(&{}_state)", acc_name));
+    result = result.replace(
+        &format!("(& {})", acc_name),
+        &format!("(&{}_state)", acc_name),
+    );
+    result = result.replace(
+        &format!("(&{})", acc_name),
+        &format!("(&{}_state)", acc_name),
+    );
     // Also handle patterns like get_current_amplification (& pool)
-    result = result.replace(&format!(" (& {}) ", acc_name), &format!("(&{}_state) ", acc_name));
+    result = result.replace(
+        &format!(" (& {}) ", acc_name),
+        &format!("(&{}_state) ", acc_name),
+    );
     // Handle &mut references
-    result = result.replace(&format!("(& mut {})", acc_name), &format!("(&mut {}_state)", acc_name));
-    result = result.replace(&format!("(&mut {})", acc_name), &format!("(&mut {}_state)", acc_name));
-    result = result.replace(&format!(" (& mut {}) ", acc_name), &format!("(&mut {}_state) ", acc_name));
+    result = result.replace(
+        &format!("(& mut {})", acc_name),
+        &format!("(&mut {}_state)", acc_name),
+    );
+    result = result.replace(
+        &format!("(&mut {})", acc_name),
+        &format!("(&mut {}_state)", acc_name),
+    );
+    result = result.replace(
+        &format!(" (& mut {}) ", acc_name),
+        &format!("(&mut {}_state) ", acc_name),
+    );
     // Handle patterns with trailing comma or paren: (& user_position,
-    result = result.replace(&format!(", & {},", acc_name), &format!(", &{}_state,", acc_name));
-    result = result.replace(&format!(", & {})", acc_name), &format!(", &{}_state)", acc_name));
+    result = result.replace(
+        &format!(", & {},", acc_name),
+        &format!(", &{}_state,", acc_name),
+    );
+    result = result.replace(
+        &format!(", & {})", acc_name),
+        &format!(", &{}_state)", acc_name),
+    );
     // Handle (account) pattern - passing account directly as argument
-    result = result.replace(&format!(" ({})", acc_name), &format!(" (&{}_state)", acc_name));
-    result = result.replace(&format!("({})", acc_name), &format!("(&{}_state)", acc_name));
+    result = result.replace(
+        &format!(" ({})", acc_name),
+        &format!(" (&{}_state)", acc_name),
+    );
+    result = result.replace(
+        &format!("({})", acc_name),
+        &format!("(&{}_state)", acc_name),
+    );
     // Handle (& account, pattern - with trailing comma
-    result = result.replace(&format!("(& {},", acc_name), &format!("(&{}_state,", acc_name));
+    result = result.replace(
+        &format!("(& {},", acc_name),
+        &format!("(&{}_state,", acc_name),
+    );
     // Handle {name}_key assignment - dereference if needed
     let key_var = format!("{}_key", acc_name);
     if result.contains(&key_var) {
@@ -650,14 +797,20 @@ fn transform_state_access(body: &str, accounts: &[PinocchioAccount]) -> String {
         let state_type = get_state_type(&acc.name);
         result = result.replace(
             &format!("{}.load_mut()?", acc.name),
-            &format!("// Access {} as mutable\n    {}", acc.name,
-                cpi_helpers::state_deserialize_write(&state_type, &acc.name, false))
+            &format!(
+                "// Access {} as mutable\n    {}",
+                acc.name,
+                cpi_helpers::state_deserialize_write(&state_type, &acc.name, false)
+            ),
         );
         // Pattern: account.load()?
         result = result.replace(
             &format!("{}.load()?", acc.name),
-            &format!("// Access {} as readonly\n    {}", acc.name,
-                cpi_helpers::state_deserialize_read(&state_type, &acc.name))
+            &format!(
+                "// Access {} as readonly\n    {}",
+                acc.name,
+                cpi_helpers::state_deserialize_read(&state_type, &acc.name)
+            ),
         );
     }
 
@@ -719,17 +872,46 @@ fn replace_state_field_access(body: &str, acc_name: &str) -> String {
     // Note: We use a whitelist approach here rather than blacklist (excluding AccountInfo methods)
     // because it's more conservative and specific to the known state struct fields
     let state_fields = [
-        "authority", "bags_mint", "pump_mint", "bags_vault", "pump_vault",
-        "lp_mint", "bags_balance", "pump_balance", "lp_supply", "bump",
-        "paused", "swap_fee_bps", "admin_fee_percent", "amplification",
-        "initial_amp", "target_amp", "amp_ramp_start", "amp_ramp_end",
-        "pending_authority", "authority_transfer_time", "amp_commit_hash",
-        "amp_commit_time", "admin_fees_bags", "admin_fees_pump",
-        "bags_vault_bump", "pump_vault_bump", "lp_mint_bump",
-        "total_volume_bags", "total_volume_pump", "total_staked",
-        "accumulated_reward_per_share", "last_update_time", "reward_per_second",
-        "start_time", "end_time", "total_rewards", "distributed_rewards",
-        "staked_amount", "reward_debt", "pending_rewards",
+        "authority",
+        "bags_mint",
+        "pump_mint",
+        "bags_vault",
+        "pump_vault",
+        "lp_mint",
+        "bags_balance",
+        "pump_balance",
+        "lp_supply",
+        "bump",
+        "paused",
+        "swap_fee_bps",
+        "admin_fee_percent",
+        "amplification",
+        "initial_amp",
+        "target_amp",
+        "amp_ramp_start",
+        "amp_ramp_end",
+        "pending_authority",
+        "authority_transfer_time",
+        "amp_commit_hash",
+        "amp_commit_time",
+        "admin_fees_bags",
+        "admin_fees_pump",
+        "bags_vault_bump",
+        "pump_vault_bump",
+        "lp_mint_bump",
+        "total_volume_bags",
+        "total_volume_pump",
+        "total_staked",
+        "accumulated_reward_per_share",
+        "last_update_time",
+        "reward_per_second",
+        "start_time",
+        "end_time",
+        "total_rewards",
+        "distributed_rewards",
+        "staked_amount",
+        "reward_debt",
+        "pending_rewards",
     ];
 
     for field in &state_fields {
@@ -756,12 +938,13 @@ fn get_state_type(account_name: &str) -> String {
         "stake_position" => "UserFarmingPosition".to_string(),
         _ => {
             // Convert snake_case to PascalCase
-            account_name.split('_')
+            account_name
+                .split('_')
                 .map(|s| {
                     let mut c = s.chars();
                     match c.next() {
                         None => String::new(),
-                        Some(f) => f.to_uppercase().collect::<String>() + c.as_str()
+                        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
                     }
                 })
                 .collect()
@@ -850,7 +1033,10 @@ fn transform_token_transfer(body: &str) -> String {
 
     // Normalize spaces in CPI calls first
     result = result.replace("token :: transfer", "token::transfer");
-    result = result.replace("CpiContext :: new_with_signer", "CpiContext::new_with_signer");
+    result = result.replace(
+        "CpiContext :: new_with_signer",
+        "CpiContext::new_with_signer",
+    );
     result = result.replace("CpiContext :: new", "CpiContext::new");
 
     let patterns_no_signer = [
@@ -959,7 +1145,10 @@ fn transform_single_transfer(call: &str, with_signer: bool) -> String {
     }
 
     // If parsing fails, return a TODO comment
-    format!("// TODO: Transform CPI: {}", call.chars().take(100).collect::<String>())
+    format!(
+        "// TODO: Transform CPI: {}",
+        call.chars().take(100).collect::<String>()
+    )
 }
 
 /// Extract the amount with context from from/to account names
@@ -985,7 +1174,10 @@ fn extract_transfer_amount(rest: &str) -> String {
         let before_end = &trimmed[..last_paren];
         // Find the previous comma
         if let Some(comma_pos) = before_end.rfind(',') {
-            let amount = before_end[comma_pos + 1..].trim().trim_end_matches(')').trim();
+            let amount = before_end[comma_pos + 1..]
+                .trim()
+                .trim_end_matches(')')
+                .trim();
             if !amount.is_empty() && !amount.contains("signer") {
                 return clean_spaces_simple(amount);
             }
@@ -995,9 +1187,9 @@ fn extract_transfer_amount(rest: &str) -> String {
     // Fallback: look for common amount variable names (most specific first)
     // These are common variable names used in Anchor programs for transfer amounts
     for var in [
-        "total_pending",       // Farming rewards claims
-        "bags_to_withdraw",    // Admin fee withdrawal
-        "pump_to_withdraw",    // Admin fee withdrawal
+        "total_pending",    // Farming rewards claims
+        "bags_to_withdraw", // Admin fee withdrawal
+        "pump_to_withdraw", // Admin fee withdrawal
         "bags_amount",
         "pump_amount",
         "lp_amount",
@@ -1045,7 +1237,10 @@ fn extract_field(s: &str, field_name: &str) -> String {
     let pattern = format!("{} :", field_name);
     if let Some(start) = s.find(&pattern) {
         let after = &s[start + pattern.len()..];
-        let end = after.find(',').or_else(|| after.find('}')).unwrap_or(after.len());
+        let end = after
+            .find(',')
+            .or_else(|| after.find('}'))
+            .unwrap_or(after.len());
         return after[..end].trim().to_string();
     }
     String::new()
@@ -1135,17 +1330,17 @@ fn transform_single_mint(call: &str) -> String {
 
             // Use cpi_helpers to generate the code
             return cpi_helpers::token_mint_to_cpi(
-                &mint_ref,
-                &to_ref,
-                &auth_ref,
-                &amount,
+                &mint_ref, &to_ref, &auth_ref, &amount,
                 true, // Assuming with_signer since that's the common case
                 None, // TODO: Extract signer seeds
             );
         }
     }
 
-    format!("// TODO: Transform mint CPI: {}", call.chars().take(80).collect::<String>())
+    format!(
+        "// TODO: Transform mint CPI: {}",
+        call.chars().take(80).collect::<String>()
+    )
 }
 
 /// Extract amount from mint_to call
@@ -1156,7 +1351,10 @@ fn extract_mint_amount(rest: &str) -> String {
     if let Some(last_paren) = trimmed.rfind(") ?") {
         let before_end = &trimmed[..last_paren];
         if let Some(comma_pos) = before_end.rfind(',') {
-            let amount = before_end[comma_pos + 1..].trim().trim_end_matches(')').trim();
+            let amount = before_end[comma_pos + 1..]
+                .trim()
+                .trim_end_matches(')')
+                .trim();
             if !amount.is_empty() && !amount.contains("signer") {
                 return clean_spaces_simple(amount);
             }
@@ -1249,16 +1447,14 @@ fn transform_single_burn(call: &str, _with_signer: bool) -> String {
             let auth_ref = clean_account_name(&authority);
 
             // Use cpi_helpers to generate the code
-            return cpi_helpers::token_burn_cpi(
-                &mint_ref,
-                &from_ref,
-                &auth_ref,
-                &amount,
-            );
+            return cpi_helpers::token_burn_cpi(&mint_ref, &from_ref, &auth_ref, &amount);
         }
     }
 
-    format!("// TODO: Transform burn CPI: {}", call.chars().take(80).collect::<String>())
+    format!(
+        "// TODO: Transform burn CPI: {}",
+        call.chars().take(80).collect::<String>()
+    )
 }
 
 fn extract_burn_amount(rest: &str) -> String {
@@ -1267,7 +1463,10 @@ fn extract_burn_amount(rest: &str) -> String {
     if let Some(last_paren) = trimmed.rfind(") ?") {
         let before_end = &trimmed[..last_paren];
         if let Some(comma_pos) = before_end.rfind(',') {
-            let amount = before_end[comma_pos + 1..].trim().trim_end_matches(')').trim();
+            let amount = before_end[comma_pos + 1..]
+                .trim()
+                .trim_end_matches(')')
+                .trim();
             if !amount.is_empty() && !amount.contains("signer") {
                 return clean_spaces_simple(amount);
             }
@@ -1301,7 +1500,7 @@ fn transform_system_transfer(body: &str) -> String {
 
     result = result.replace(
         "system_program::transfer(",
-        "// Pinocchio SOL transfer\n    pinocchio_system::instructions::Transfer {\n        from: "
+        "// Pinocchio SOL transfer\n    pinocchio_system::instructions::Transfer {\n        from: ",
     );
 
     result
@@ -1317,15 +1516,9 @@ fn transform_direct_lamport_transfer(body: &str) -> String {
     // **to_account.lamports.borrow_mut() += amount;
     // Convert to Pinocchio: **from_account.try_borrow_mut_lamports()? -= amount;
 
-    result = result.replace(
-        ".lamports.borrow_mut()",
-        ".try_borrow_mut_lamports()?"
-    );
+    result = result.replace(".lamports.borrow_mut()", ".try_borrow_mut_lamports()?");
 
-    result = result.replace(
-        ".lamports.borrow()",
-        ".try_borrow_lamports()?"
-    );
+    result = result.replace(".lamports.borrow()", ".try_borrow_lamports()?");
 
     // Pattern: Explicit two-line transfers can be detected and consolidated
     // Look for patterns like:
@@ -1391,7 +1584,8 @@ fn transform_system_transfer_inline(body: &str) -> String {
                     let to_clean = clean_account_name(&to_account);
 
                     // Use the helper to generate inline lamport manipulation
-                    let inline_code = cpi_helpers::sol_transfer_cpi(&from_clean, &to_clean, &amount);
+                    let inline_code =
+                        cpi_helpers::sol_transfer_cpi(&from_clean, &to_clean, &amount);
 
                     // Find the end of the entire system_program::transfer call
                     if let Some(call_end) = result[start..].find(")?") {
@@ -1423,7 +1617,8 @@ fn transform_require_macro(body: &str) -> String {
                 let error = inner[comma + 1..].trim();
                 let replacement = format!(
                     "if !({}) {{\n        return Err({}.into());\n    }}",
-                    clean_spaces(cond), error.trim_end_matches(')')
+                    clean_spaces(cond),
+                    error.trim_end_matches(')')
                 );
                 result = result.replacen(macro_call, &replacement, 1);
             } else {
@@ -1445,7 +1640,8 @@ fn transform_require_macro(body: &str) -> String {
                 let error = inner[comma + 1..].trim();
                 let replacement = format!(
                     "if !({}) {{\n        return Err({}.into());\n    }}",
-                    clean_spaces(cond), error
+                    clean_spaces(cond),
+                    error
                 );
                 result = result.replacen(macro_call, &replacement, 1);
             } else {
@@ -1549,7 +1745,7 @@ fn fix_signer_seeds(body: &str) -> String {
     );
     result = result.replace(
         "let signer_seeds = & [& pool_seeds [..]] ;",
-        "let signer = pinocchio::instruction::Signer::from(&pool_seeds);"
+        "let signer = pinocchio::instruction::Signer::from(&pool_seeds);",
     );
 
     // Pattern 2: Period PDA signer (farming_period PDA)
@@ -1557,21 +1753,23 @@ fn fix_signer_seeds(body: &str) -> String {
     // Need to create signer from period_seeds
     result = result.replace("& [period_bump]", "&[farming_period_state.bump]");
 
-
     // Also handle pool_state.bump pattern
     result = result.replace("& [pool_bump]", "&[pool_state.bump]");
     result = result.replace("pool_bump]", "pool_state.bump]");
 
     // Replace signer_seeds references
     // Convert: .invoke_signed(signer_seeds)? to .invoke_signed(&[signer])?
-    result = result.replace(".invoke_signed(signer_seeds)?", ".invoke_signed(&[signer])?");
+    result = result.replace(
+        ".invoke_signed(signer_seeds)?",
+        ".invoke_signed(&[signer])?",
+    );
 
     // Handle farming_period PDA signer pattern
     // Replace let signer_seeds = & [& period_seeds [..]] with proper signer creation
     if result.contains("& [& period_seeds [..]]") {
         result = result.replace(
             "let signer_seeds = & [& period_seeds [..]] ;",
-            "let signer = pinocchio::instruction::Signer::from(&period_seeds);"
+            "let signer = pinocchio::instruction::Signer::from(&period_seeds);",
         );
     }
 
@@ -1580,7 +1778,9 @@ fn fix_signer_seeds(body: &str) -> String {
     // Pattern: let period_seeds = [b"farming_period".as_ref (), pool_key.as_ref (), start_time_bytes.as_ref (), &[bump],] ;
     use regex::Regex;
     // Pattern has "& [" with space after &
-    if result.contains("let period_seeds = & [b\"farming_period\"") || result.contains("let period_seeds = [b\"farming_period\"") {
+    if result.contains("let period_seeds = & [b\"farming_period\"")
+        || result.contains("let period_seeds = [b\"farming_period\"")
+    {
         // Find and replace the period_seeds pattern with proper Seed::from() wrapping
         // Pattern has:
         // - Optional & before [
@@ -1591,12 +1791,16 @@ fn fix_signer_seeds(body: &str) -> String {
         ).unwrap();
 
         if let Some(caps) = period_pattern.captures(&result) {
-            let bump_var = caps.get(1).map_or("farming_period_state.bump", |m| m.as_str());
+            let bump_var = caps
+                .get(1)
+                .map_or("farming_period_state.bump", |m| m.as_str());
             let replacement = format!(
                 "let period_bump_bytes = [{}];\n    let period_seeds = [\n        pinocchio::instruction::Seed::from(b\"farming_period\" as &[u8]),\n        pinocchio::instruction::Seed::from(pool_key.as_ref()),\n        pinocchio::instruction::Seed::from(start_time_bytes.as_ref()),\n        pinocchio::instruction::Seed::from(&period_bump_bytes as &[u8]),\n    ];",
                 bump_var
             );
-            result = period_pattern.replace(&result, replacement.as_str()).to_string();
+            result = period_pattern
+                .replace(&result, replacement.as_str())
+                .to_string();
         }
     }
 
@@ -1636,9 +1840,19 @@ fn fix_token_amount_access(body: &str) -> String {
 
     // Token accounts that might have .amount, .mint, or .owner accessed
     let token_accounts = [
-        "bags_vault", "pump_vault", "user_bags", "user_pump", "user_lp",
-        "farming_vault", "reward_vault", "staking_vault", "staked_lp_vault",
-        "user_token", "user_reward_account", "admin_bags", "admin_pump",
+        "bags_vault",
+        "pump_vault",
+        "user_bags",
+        "user_pump",
+        "user_lp",
+        "farming_vault",
+        "reward_vault",
+        "staking_vault",
+        "staked_lp_vault",
+        "user_token",
+        "user_reward_account",
+        "admin_bags",
+        "admin_pump",
     ];
 
     for acc in &token_accounts {
@@ -1670,8 +1884,16 @@ fn fix_pubkey_assignments(body: &str) -> String {
 
     // Pubkey fields that need dereferencing when assigned
     let pubkey_fields = [
-        "authority", "bags_mint", "pump_mint", "bags_vault", "pump_vault",
-        "lp_mint", "pool", "reward_mint", "owner", "farming_period",
+        "authority",
+        "bags_mint",
+        "pump_mint",
+        "bags_vault",
+        "pump_vault",
+        "lp_mint",
+        "pool",
+        "reward_mint",
+        "owner",
+        "farming_period",
         "pending_authority",
     ];
 
@@ -1716,23 +1938,17 @@ fn fix_pubkey_assignments(body: &str) -> String {
     // where new_authority is a &[u8; 32] that needs dereferencing
     let pubkey_vars = ["new_authority", "pending_authority"];
     for var in &pubkey_vars {
-        result = result.replace(
-            &format!("Some ({}) ;", var),
-            &format!("Some (*{}) ;", var)
-        );
-        result = result.replace(
-            &format!("Some ({});", var),
-            &format!("Some (*{});", var)
-        );
+        result = result.replace(&format!("Some ({}) ;", var), &format!("Some (*{}) ;", var));
+        result = result.replace(&format!("Some ({});", var), &format!("Some (*{});", var));
         // Fix comparison with Pubkey::default() - need to dereference the reference
         // Pattern: new_authority != Pubkey::default () -> *new_authority != Pubkey::default ()
         result = result.replace(
             &format!("{} != Pubkey::default", var),
-            &format!("*{} != Pubkey::default", var)
+            &format!("*{} != Pubkey::default", var),
         );
         result = result.replace(
             &format!("{} == Pubkey::default", var),
-            &format!("*{} == Pubkey::default", var)
+            &format!("*{} == Pubkey::default", var),
         );
     }
 
@@ -1751,7 +1967,7 @@ fn fix_multiline_msg(body: &str) -> String {
 
         // Look for msg ! ( pattern
         if i + 7 <= len {
-            let slice: String = chars[i..i+7].iter().collect();
+            let slice: String = chars[i..i + 7].iter().collect();
             if slice == "msg ! (" {
                 // Found start of msg! - collect until matching )
                 result.push_str("msg!(");
@@ -1784,7 +2000,7 @@ fn fix_multiline_msg(body: &str) -> String {
 
         // Look for msg!( pattern (no space)
         if i + 5 <= len {
-            let slice: String = chars[i..i+5].iter().collect();
+            let slice: String = chars[i..i + 5].iter().collect();
             if slice == "msg!(" {
                 result.push_str("msg!(");
                 i += 5;
@@ -1829,13 +2045,17 @@ fn transform_state(
     anchor_state: &AnchorStateStruct,
     analysis: &ProgramAnalysis,
 ) -> Result<PinocchioState> {
-    let size_info = analysis.account_sizes.iter()
+    let size_info = analysis
+        .account_sizes
+        .iter()
         .find(|s| s.struct_name == anchor_state.name);
 
     let total_size = size_info.map(|s| s.size).unwrap_or(0);
 
     let mut offset = 8; // Skip discriminator
-    let fields: Vec<PinocchioField> = anchor_state.fields.iter()
+    let fields: Vec<PinocchioField> = anchor_state
+        .fields
+        .iter()
         .map(|f| {
             let size = estimate_field_size(&f.ty);
             let field = PinocchioField {
@@ -1876,7 +2096,8 @@ fn rust_type_to_pinocchio(ty: &str) -> String {
 }
 
 fn transform_errors(anchor_errors: &[AnchorError]) -> Vec<PinocchioError> {
-    anchor_errors.iter()
+    anchor_errors
+        .iter()
         .map(|e| PinocchioError {
             name: e.name.clone(),
             code: e.code.unwrap_or(6000),
@@ -1887,7 +2108,7 @@ fn transform_errors(anchor_errors: &[AnchorError]) -> Vec<PinocchioError> {
 
 fn anchor_discriminator(name: &str) -> Vec<u8> {
     // Anchor uses: sha256("global:{name}")[0..8]
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
 
     let preimage = format!("global:{}", to_snake_case(name));
     let hash = Sha256::digest(preimage.as_bytes());

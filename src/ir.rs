@@ -46,14 +46,14 @@ pub struct AnchorAccount {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AccountType {
-    Account { inner: String },      // Account<'info, T>
-    Signer,                         // Signer<'info>
-    SystemAccount,                  // SystemAccount<'info>
-    UncheckedAccount,              // UncheckedAccount<'info>
-    Program { inner: String },      // Program<'info, T>
-    Sysvar { inner: String },       // Sysvar<'info, T>
-    TokenAccount,                   // anchor_spl::token::TokenAccount
-    Mint,                           // anchor_spl::token::Mint
+    Account { inner: String },       // Account<'info, T>
+    Signer,                          // Signer<'info>
+    SystemAccount,                   // SystemAccount<'info>
+    UncheckedAccount,                // UncheckedAccount<'info>
+    Program { inner: String },       // Program<'info, T>
+    Sysvar { inner: String },        // Sysvar<'info, T>
+    TokenAccount,                    // anchor_spl::token::TokenAccount
+    Mint,                            // anchor_spl::token::Mint
     Box { inner: Box<AccountType> }, // Box<Account<...>>
 }
 
@@ -69,7 +69,7 @@ pub enum AccountConstraint {
         space: String,
     },
     Seeds(Vec<String>),
-    Bump(Option<String>),  // None = canonical bump, Some(x) = x.bump
+    Bump(Option<String>), // None = canonical bump, Some(x) = x.bump
     TokenMint(String),
     TokenAuthority(String),
     MintDecimals(u8),
@@ -182,12 +182,28 @@ pub struct PinocchioAccount {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Validation {
-    IsSigner { account_idx: usize },
-    IsWritable { account_idx: usize },
-    PdaCheck { account_idx: usize, seeds: Vec<String>, bump: Option<String> },
-    OwnerCheck { account_idx: usize, owner: String },
-    KeyEquals { account_idx: usize, expected: String },
-    Custom { code: String },
+    IsSigner {
+        account_idx: usize,
+    },
+    IsWritable {
+        account_idx: usize,
+    },
+    PdaCheck {
+        account_idx: usize,
+        seeds: Vec<String>,
+        bump: Option<String>,
+    },
+    OwnerCheck {
+        account_idx: usize,
+        owner: String,
+    },
+    KeyEquals {
+        account_idx: usize,
+        expected: String,
+    },
+    Custom {
+        code: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
