@@ -74,7 +74,7 @@ fn emit_helpers_rs(extras: &SourceExtras, src_dir: &Path) -> Result<()> {
         for c in &extras.constants {
             content.push_str(&format!("pub const {}: {} = {};\n", c.name, c.ty, c.value));
         }
-        content.push_str("\n");
+        content.push('\n');
     }
 
     // Emit helper functions
@@ -383,7 +383,7 @@ fn emit_lib_rs(program: &PinocchioProgram, src_dir: &Path, has_helpers: bool) ->
     if has_helpers {
         content.push_str("pub use helpers::*;\n");
     }
-    content.push_str("\n");
+    content.push('\n');
 
     // Program ID as bytes (Pinocchio uses [u8; 32])
     if let Some(id) = &program.program_id {
@@ -396,7 +396,7 @@ fn emit_lib_rs(program: &PinocchioProgram, src_dir: &Path, has_helpers: bool) ->
                 for b in chunk {
                     content.push_str(&format!("{:#04x}, ", b));
                 }
-                content.push_str("\n");
+                content.push('\n');
             }
         } else {
             content.push_str("    0; 32 // TODO: Decode program ID\n");
@@ -429,7 +429,7 @@ fn emit_lib_rs(program: &PinocchioProgram, src_dir: &Path, has_helpers: bool) ->
             disc_bytes.join(", ")
         ));
     }
-    content.push_str("\n");
+    content.push('\n');
 
     // Main dispatch function
     content.push_str("pub fn process_instruction(\n");
@@ -501,8 +501,8 @@ fn bs58_decode(s: &str) -> Result<Vec<u8>> {
 
     // Handle leading zeros
     let leading_zeros = s.bytes().take_while(|&c| c == b'1').count();
-    for i in 0..leading_zeros {
-        result[i] = 0;
+    for item in result.iter_mut().take(leading_zeros) {
+        *item = 0;
     }
 
     Ok(result)
@@ -536,7 +536,7 @@ fn emit_state_rs(program: &PinocchioProgram, src_dir: &Path) -> Result<()> {
             "    pub fn from_account_info(info: &AccountInfo) -> Result<&Self, ProgramError> {\n",
         );
         content.push_str("        let data = info.try_borrow_data()?;\n");
-        content.push_str(&format!("        if data.len() < 8 + Self::SIZE {{\n"));
+        content.push_str("        if data.len() < 8 + Self::SIZE {\n");
         content.push_str("            return Err(ProgramError::InvalidAccountData);\n");
         content.push_str("        }\n");
         content.push_str("        // Skip 8-byte discriminator\n");
@@ -547,7 +547,7 @@ fn emit_state_rs(program: &PinocchioProgram, src_dir: &Path) -> Result<()> {
         content.push_str("    #[inline(always)]\n");
         content.push_str("    pub fn from_account_info_mut(info: &AccountInfo) -> Result<&mut Self, ProgramError> {\n");
         content.push_str("        let mut data = info.try_borrow_mut_data()?;\n");
-        content.push_str(&format!("        if data.len() < 8 + Self::SIZE {{\n"));
+        content.push_str("        if data.len() < 8 + Self::SIZE {\n");
         content.push_str("            return Err(ProgramError::InvalidAccountData);\n");
         content.push_str("        }\n");
         content.push_str("        Ok(unsafe { &mut *(data[8..].as_mut_ptr() as *mut Self) })\n");
@@ -596,7 +596,7 @@ fn emit_instructions(program: &PinocchioProgram, src_dir: &Path) -> Result<()> {
     for inst in &program.instructions {
         mod_content.push_str(&format!("mod {};\n", inst.name));
     }
-    mod_content.push_str("\n");
+    mod_content.push('\n');
     for inst in &program.instructions {
         mod_content.push_str(&format!("pub use {}::{};\n", inst.name, inst.name));
     }
@@ -636,7 +636,7 @@ fn emit_instruction(
     {
         content.push_str("use pinocchio_token::instructions::{Transfer, MintTo, Burn};\n");
     }
-    content.push_str("\n");
+    content.push('\n');
 
     content.push_str("use crate::error::Error;\n");
     content.push_str("use crate::helpers::*;\n");
@@ -647,7 +647,7 @@ fn emit_instruction(
             content.push_str(&format!("use crate::state::{};\n", state.name));
         }
     }
-    content.push_str("\n");
+    content.push('\n');
 
     // Account indices as constants for clarity
     if !inst.accounts.is_empty() {
@@ -659,7 +659,7 @@ fn emit_instruction(
                 acc.index
             ));
         }
-        content.push_str("\n");
+        content.push('\n');
     }
 
     // Function signature
@@ -691,7 +691,7 @@ fn emit_instruction(
             to_screaming_snake(&acc.name)
         ));
     }
-    content.push_str("\n");
+    content.push('\n');
 
     // Detect which instruction args are used in PDA seeds and parse them early
     let mut args_used_in_pda: Vec<String> = Vec::new();
@@ -719,7 +719,7 @@ fn emit_instruction(
             }
             offset += size;
         }
-        content.push_str("\n");
+        content.push('\n');
     }
 
     // Emit validations
@@ -824,7 +824,7 @@ fn emit_instruction(
     }
 
     if has_validations {
-        content.push_str("\n");
+        content.push('\n');
     }
 
     // Parse remaining instruction arguments (skip those already parsed for PDA seeds)
@@ -846,7 +846,7 @@ fn emit_instruction(
             }
             offset += size;
         }
-        content.push_str("\n");
+        content.push('\n');
     }
 
     // Add transformed body or placeholder

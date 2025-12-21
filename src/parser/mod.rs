@@ -284,7 +284,7 @@ fn extract_generic(ty_str: &str, wrapper: &str) -> String {
         if let Some(end) = rest.rfind('>') {
             let inner = &rest[..end];
             if inner.contains(',') {
-                return inner.split(',').last().unwrap_or(inner).trim().to_string();
+                return inner.split(',').next_back().unwrap_or(inner).trim().to_string();
             }
             return inner.trim().to_string();
         }
@@ -443,7 +443,7 @@ fn extract_value(s: &str, key: &str) -> String {
         if let Some(eq_idx) = rest.find('=') {
             let value_start = rest[eq_idx + 1..].trim_start();
             let end = value_start
-                .find(|c| c == ',' || c == ')' || c == '@')
+                .find([',', ')', '@'])
                 .unwrap_or(value_start.len());
             return value_start[..end].trim().to_string();
         }

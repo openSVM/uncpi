@@ -1081,7 +1081,7 @@ fn transform_token_transfer(body: &str) -> String {
 fn find_transfer_end(s: &str) -> Option<usize> {
     let mut depth = 0;
     let mut in_call = false;
-    for (i, c) in s.chars().enumerate() {
+    for (i, c) in s.char_indices() {
         match c {
             '(' => {
                 depth += 1;
@@ -1218,7 +1218,7 @@ fn clean_spaces_simple(s: &str) -> String {
 
 fn find_matching_brace(s: &str) -> Option<usize> {
     let mut depth = 0;
-    for (i, c) in s.chars().enumerate() {
+    for (i, c) in s.char_indices() {
         match c {
             '{' => depth += 1,
             '}' => {
@@ -1285,7 +1285,7 @@ fn transform_token_mint_to(body: &str) -> String {
 fn find_mint_end(s: &str) -> Option<usize> {
     let mut depth = 0;
     let mut in_call = false;
-    for (i, c) in s.chars().enumerate() {
+    for (i, c) in s.char_indices() {
         match c {
             '(' => {
                 depth += 1;
@@ -1403,7 +1403,7 @@ fn transform_token_burn(body: &str) -> String {
 fn find_burn_end(s: &str) -> Option<usize> {
     let mut depth = 0;
     let mut in_call = false;
-    for (i, c) in s.chars().enumerate() {
+    for (i, c) in s.char_indices() {
         match c {
             '(' => {
                 depth += 1;
@@ -1659,7 +1659,7 @@ fn transform_require_macro(body: &str) -> String {
 fn find_last_comma(s: &str) -> Option<usize> {
     let mut depth = 0;
     let mut last_comma = None;
-    for (i, c) in s.chars().enumerate() {
+    for (i, c) in s.char_indices() {
         match c {
             '(' | '[' | '{' => depth += 1,
             ')' | ']' | '}' => depth -= 1,
@@ -1694,7 +1694,7 @@ fn clean_spaces(s: &str) -> String {
 
 fn find_matching_paren(s: &str) -> Option<usize> {
     let mut depth = 0;
-    for (i, c) in s.chars().enumerate() {
+    for (i, c) in s.char_indices() {
         match c {
             '(' => depth += 1,
             ')' => {
@@ -1906,7 +1906,7 @@ fn fix_pubkey_assignments(body: &str) -> String {
         ];
 
         for prefix in &patterns {
-            while let Some(start) = result.find(prefix) {
+            if let Some(start) = result.find(prefix) {
                 let after = &result[start + prefix.len()..];
 
                 // Find the end of the assignment (;)
@@ -1914,8 +1914,8 @@ fn fix_pubkey_assignments(body: &str) -> String {
                     let value = &after[..semi].trim();
 
                     // If it ends with .key() and doesn't start with *, dereference it
-                    if value.ends_with(".key ()") || value.ends_with(".key()") {
-                        if !value.starts_with('*') {
+                    if (value.ends_with(".key ()") || value.ends_with(".key()"))
+                        && !value.starts_with('*') {
                             let new_value = format!("*{}", value);
                             result = format!(
                                 "{}{}{}{}",
@@ -1925,10 +1925,7 @@ fn fix_pubkey_assignments(body: &str) -> String {
                                 &result[start + prefix.len() + semi + 1..]
                             );
                         }
-                    }
                 }
-                // Break to avoid infinite loop if pattern doesn't change
-                break;
             }
         }
     }
@@ -2118,7 +2115,7 @@ fn anchor_discriminator(name: &str) -> Vec<u8> {
 
 fn to_snake_case(s: &str) -> String {
     let mut result = String::new();
-    for (i, c) in s.chars().enumerate() {
+    for (i, c) in s.char_indices() {
         if c.is_uppercase() {
             if i > 0 {
                 result.push('_');

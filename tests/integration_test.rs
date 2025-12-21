@@ -433,7 +433,7 @@ fn test_binary_size_reduction() {
                 if let Ok(entries) = std::fs::read_dir(&deploy_dir) {
                     for entry in entries.filter_map(|e| e.ok()) {
                         let path = entry.path();
-                        if path.extension().map_or(false, |ext| ext == "so") {
+                        if path.extension().is_some_and(|ext| ext == "so") {
                             let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
 
                             // Pinocchio binary should be under 100KB (typically 87KB)

@@ -99,13 +99,13 @@ pub fn generate_idl(program: &PinocchioProgram, program_id: Option<&str>) -> Idl
     let instructions: Vec<IdlInstruction> = program
         .instructions
         .iter()
-        .map(|inst| instruction_to_idl(inst))
+        .map(instruction_to_idl)
         .collect();
 
     let accounts: Vec<IdlAccount> = program
         .state_structs
         .iter()
-        .map(|state| state_to_idl_account(state))
+        .map(state_to_idl_account)
         .collect();
 
     let errors: Vec<IdlError> = program

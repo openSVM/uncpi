@@ -11,8 +11,7 @@ pub fn token_transfer_cpi(
     with_signer: bool,
     signer_seeds: Option<&[&str]>,
 ) -> String {
-    if with_signer && signer_seeds.is_some() {
-        let seeds = signer_seeds.unwrap();
+    if let (true, Some(seeds)) = (with_signer, signer_seeds) {
         let seeds_code: Vec<String> = seeds.iter().map(|s| format!("        {},", s)).collect();
         format!(
             r#"// Token transfer with PDA signer
@@ -59,8 +58,7 @@ pub fn token_mint_to_cpi(
     with_signer: bool,
     signer_seeds: Option<&[&str]>,
 ) -> String {
-    if with_signer && signer_seeds.is_some() {
-        let seeds = signer_seeds.unwrap();
+    if let (true, Some(seeds)) = (with_signer, signer_seeds) {
         let seeds_code: Vec<String> = seeds.iter().map(|s| format!("        {},", s)).collect();
         format!(
             r#"// Mint tokens with PDA signer
