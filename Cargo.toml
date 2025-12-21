@@ -4,11 +4,20 @@
 name = "uncpi"
 version = "0.1.0"
 edition = "2021"
+authors = ["openSVM"]
 description = "Transpile Anchor programs to Pinocchio for 85%+ size reduction"
 license = "MIT"
 repository = "https://github.com/openSVM/uncpi"
+homepage = "https://github.com/openSVM/uncpi"
+documentation = "https://github.com/openSVM/uncpi/blob/master/README.md"
+readme = "README.md"
 keywords = ["solana", "anchor", "pinocchio", "transpiler", "optimization"]
 categories = ["development-tools", "compilers"]
+exclude = [
+    ".github/",
+    "target/",
+    "tests/",
+]
 
 [[bin]]
 name = "uncpi"

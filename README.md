@@ -1,5 +1,9 @@
 # uncpi
 
+[![Crates.io](https://img.shields.io/crates/v/uncpi.svg)](https://crates.io/crates/uncpi)
+[![CI](https://github.com/openSVM/uncpi/workflows/CI/badge.svg)](https://github.com/openSVM/uncpi/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
 > "ok unc, let me show you how to optimize"
 
 Transpile Anchor programs to Pinocchio for 85%+ binary size reduction.
@@ -14,9 +18,23 @@ Transpile Anchor programs to Pinocchio for 85%+ binary size reduction.
 
 ## Install
 
+### From crates.io (recommended)
+
 ```bash
 cargo install uncpi
 ```
+
+### From source
+
+```bash
+git clone https://github.com/openSVM/uncpi.git
+cd uncpi
+cargo install --path .
+```
+
+### Pre-built binaries
+
+Download pre-built binaries for Linux, macOS, and Windows from the [releases page](https://github.com/openSVM/uncpi/releases).
 
 ## Usage
 
