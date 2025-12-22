@@ -431,7 +431,7 @@ fn transform_body(body: &str, accounts: &[PinocchioAccount], config: &Config) ->
     }
 
     // Fix Pubkey comparisons - need to dereference key() for equality checks (only if exists)
-    if result.contains(".key()") && (result.contains("==") || result.contains("!=")) {
+    if (result.contains(".key()") || result.contains(".key ()")) && (result.contains("==") || result.contains("!=")) {
         result = fix_pubkey_comparisons(&result);
     }
 
@@ -1832,20 +1832,27 @@ fn find_matching_paren(s: &str) -> Option<usize> {
 fn fix_pubkey_comparisons(body: &str) -> String {
     let mut result = body.to_string();
 
-    // Pattern: pending == authority.key() should be pending == *authority.key()
-    // Or: &pending == authority.key()
-    // Look for pattern where we compare with .key()
-    // Replace == account.key () with == *account.key()
-    let accounts = ["authority", "new_authority", "pool", "user", "owner"];
-    for acc in &accounts {
-        let old = format!("== {}.key ()", acc);
-        let new = format!("== *{}.key()", acc);
-        result = result.replace(&old, &new);
+    // Simple approach: Replace comparison patterns with .key() to add dereference
+    // Pattern: == identifier.key () or == identifier.key()
+    // This is applied broadly to catch all cases
 
-        let old = format!("== {}.key()", acc);
-        let new = format!("== *{}.key()", acc);
-        result = result.replace(&old, &new);
-    }
+    // First pass: Add asterisk after == or != before .key() calls
+    // Replace "== X.key ()" with "== *X.key ()" for any identifier X
+    result = result.replace(" == ", " ==PLACEHOLDER== ");
+    result = result.replace(" != ", " !=PLACEHOLDER!= ");
+
+    // Now add asterisks for .key() patterns
+    result = result.replace("==PLACEHOLDER== ", " == *");
+    result = result.replace("!=PLACEHOLDER!= ", " != *");
+
+    // Clean up cases that were already dereferenced or are not .key() calls
+    result = result.replace(" == **", " == *");
+    result = result.replace(" != **", " != *");
+    result = result.replace(" == *Pubkey", " == Pubkey");
+    result = result.replace(" != *Pubkey", " != Pubkey");
+    result = result.replace(" == *0", " == 0");
+    result = result.replace(" == *false", " == false");
+    result = result.replace(" == *true", " == true");
 
     result
 }

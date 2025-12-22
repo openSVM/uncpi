@@ -954,6 +954,28 @@ fn emit_instruction(
                     }
                 }
 
+                // Fix Pubkey comparisons: add dereference for .key() in comparisons
+                // Replace " == X.key ()" patterns
+                for acc in &inst.accounts {
+                    // Pattern: == account.key () -> == *account.key()
+                    transformed_code = transformed_code.replace(
+                        &format!(" == {} . key ()", acc.name),
+                        &format!(" == *{}.key()", acc.name)
+                    );
+                    transformed_code = transformed_code.replace(
+                        &format!(" != {} . key ()", acc.name),
+                        &format!(" != *{}.key()", acc.name)
+                    );
+                    transformed_code = transformed_code.replace(
+                        &format!("{} . key () == ", acc.name),
+                        &format!("*{}.key() == ", acc.name)
+                    );
+                    transformed_code = transformed_code.replace(
+                        &format!("{} . key () != ", acc.name),
+                        &format!("*{}.key() != ", acc.name)
+                    );
+                }
+
                 content.push_str(&format!("    {}\n", transformed_code));
             }
             _ => {}
