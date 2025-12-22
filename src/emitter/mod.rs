@@ -89,9 +89,6 @@ fn emit_helpers_rs(extras: &SourceExtras, program: &PinocchioProgram, src_dir: &
         content.push_str("use pinocchio::sysvars::{clock::Clock, Sysvar};\n");
         content.push_str("use pinocchio::account_info::AccountInfo;\n\n");
 
-        // Add token account helpers
-        content.push_str("use pinocchio::pubkey::Pubkey;\n\n");
-
         content.push_str("/// Get token account balance from account info\n");
         content.push_str("#[inline(always)]\n");
         content.push_str(
@@ -171,6 +168,86 @@ fn emit_helpers_rs(extras: &SourceExtras, program: &PinocchioProgram, src_dir: &
             content.push_str(&format!("{} {}\n\n", sig, body));
         }
     }
+
+    // Always add token account helpers (even if no helper functions)
+    if extras.helper_functions.is_empty() {
+        // Add necessary imports if not already added
+        content.push_str("use pinocchio::account_info::AccountInfo;\n");
+        content.push_str("use pinocchio::program_error::ProgramError;\n");
+    }
+    content.push_str("use pinocchio::pubkey::Pubkey;\n\n");
+    content.push_str("// Token account helpers\n");
+
+    content.push_str("/// Get token account balance from account info\n");
+    content.push_str("#[inline(always)]\n");
+    content.push_str(
+        "pub fn get_token_balance(account: &AccountInfo) -> Result<u64, ProgramError> {\n",
+    );
+    content.push_str("    let data = account.try_borrow_data()?;\n");
+    content.push_str("    if data.len() < 72 {\n");
+    content.push_str("        return Err(ProgramError::InvalidAccountData);\n");
+    content.push_str("    }\n");
+    content.push_str(
+        "    // Token account amount is at offset 64 (after mint and owner pubkeys)\n",
+    );
+    content.push_str("    Ok(u64::from_le_bytes(data[64..72].try_into().unwrap()))\n");
+    content.push_str("}\n\n");
+
+    content.push_str("/// Get token account mint from account info\n");
+    content.push_str("#[inline(always)]\n");
+    content.push_str(
+        "pub fn get_token_mint(account: &AccountInfo) -> Result<Pubkey, ProgramError> {\n",
+    );
+    content.push_str("    let data = account.try_borrow_data()?;\n");
+    content.push_str("    if data.len() < 32 {\n");
+    content.push_str("        return Err(ProgramError::InvalidAccountData);\n");
+    content.push_str("    }\n");
+    content.push_str("    // Token account mint is at offset 0\n");
+    content.push_str("    let bytes: [u8; 32] = data[0..32].try_into().unwrap();\n");
+    content.push_str("    Ok(Pubkey::from(bytes))\n");
+    content.push_str("}\n\n");
+
+    content.push_str("/// Get token account owner from account info\n");
+    content.push_str("#[inline(always)]\n");
+    content.push_str(
+        "pub fn get_token_owner(account: &AccountInfo) -> Result<Pubkey, ProgramError> {\n",
+    );
+    content.push_str("    let data = account.try_borrow_data()?;\n");
+    content.push_str("    if data.len() < 64 {\n");
+    content.push_str("        return Err(ProgramError::InvalidAccountData);\n");
+    content.push_str("    }\n");
+    content.push_str("    // Token account owner is at offset 32\n");
+    content.push_str("    let bytes: [u8; 32] = data[32..64].try_into().unwrap();\n");
+    content.push_str("    Ok(Pubkey::from(bytes))\n");
+    content.push_str("}\n\n");
+
+    content.push_str("/// Get mint supply from account info\n");
+    content.push_str("#[inline(always)]\n");
+    content.push_str(
+        "pub fn get_mint_supply(account: &AccountInfo) -> Result<u64, ProgramError> {\n",
+    );
+    content.push_str("    let data = account.try_borrow_data()?;\n");
+    content.push_str("    if data.len() < 44 {\n");
+    content.push_str("        return Err(ProgramError::InvalidAccountData);\n");
+    content.push_str("    }\n");
+    content.push_str("    // Mint supply is at offset 36 (after mint_authority option and 32-byte pubkey)\n");
+    content.push_str("    Ok(u64::from_le_bytes(data[36..44].try_into().unwrap()))\n");
+    content.push_str("}\n\n");
+
+    content.push_str("/// Integer square root for u128 (no_std compatible)\n");
+    content.push_str("#[inline(always)]\n");
+    content.push_str("pub fn integer_sqrt(n: u128) -> u128 {\n");
+    content.push_str("    if n == 0 {\n");
+    content.push_str("        return 0;\n");
+    content.push_str("    }\n");
+    content.push_str("    let mut x = n;\n");
+    content.push_str("    let mut y = (x + 1) / 2;\n");
+    content.push_str("    while y < x {\n");
+    content.push_str("        x = y;\n");
+    content.push_str("        y = (x + n / x) / 2;\n");
+    content.push_str("    }\n");
+    content.push_str("    x\n");
+    content.push_str("}\n\n");
 
     fs::write(src_dir.join("helpers.rs"), content)?;
     Ok(())
@@ -821,12 +898,19 @@ fn emit_instruction(
             _ => String::new(),
         };
 
-        // Check if any account's fields are referenced (e.g., "pool_state.bump", "escrow_state.initializer")
+        // Check if any account's fields are referenced
         for acc in &inst.accounts {
             // Check if this account has a state type
             if let Some(state_type) = &acc.state_type {
-                // Check if state fields are referenced in validation (use _state suffix to avoid shadowing)
-                if validation_str.contains(&format!("{}_state . ", acc.name))
+                // Check if state fields are referenced in validation
+                // The transformer may have already converted "account . field" to "account_state . field"
+                // So we check for BOTH patterns
+                let account_pattern = format!("{} . ", acc.name);
+                let state_pattern = format!("{}_state . ", acc.name);
+                let key_pattern = format!("{} . key", acc.name);
+
+                if (validation_str.contains(&account_pattern) || validation_str.contains(&state_pattern))
+                    && !validation_str.contains(&key_pattern)
                     && !state_accounts_to_deserialize
                         .iter()
                         .any(|(name, _)| name == &acc.name)
@@ -1336,31 +1420,45 @@ fn remove_redundant_assignments(body: &str) -> String {
 /// Replace custom error enum names (like VotingError, StakingError) with Error
 fn fix_error_enum_names(body: &str, program: &PinocchioProgram) -> String {
     let mut result = body.to_string();
-    
+
     // If there are no errors, nothing to fix
     if program.errors.is_empty() {
         return result;
     }
-    
-    // Common error enum name patterns that need to be replaced
-    // These are from the original Anchor code and need to become "Error::"
-    let error_patterns = [
-        "VotingError::",
-        "StakingError::",
-        "EscrowError::",
-        "VaultError::",
-        "PoolError::",
-        "SwapError::",
-        "FarmingError::",
-        "LendingError::",
-        "GovernanceError::",
-    ];
-    
-    for pattern in &error_patterns {
-        if result.contains(pattern) {
-            result = result.replace(pattern, "Error::");
+
+    // Dynamically find all patterns like "SomeError::" and replace with "Error::"
+    // This uses a regex-like approach to find any word ending with "Error::"
+    let mut words_to_replace = Vec::new();
+    let chars: Vec<char> = result.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        // Look for pattern: AlphanumericError::
+        if i + 7 < chars.len() && chars[i].is_alphabetic() {
+            let mut j = i;
+            // Collect the word
+            while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '_') {
+                j += 1;
+            }
+
+            // Check if it ends with "Error::"
+            if j + 2 <= chars.len() {
+                let word: String = chars[i..j].iter().collect();
+                if word.ends_with("Error") && j + 1 < chars.len() && chars[j] == ':' && chars[j + 1] == ':' {
+                    let full_pattern = format!("{}::", word);
+                    if !words_to_replace.contains(&full_pattern) {
+                        words_to_replace.push(full_pattern);
+                    }
+                }
+            }
         }
+        i += 1;
     }
-    
+
+    // Replace all found error patterns with "Error::"
+    for pattern in words_to_replace {
+        result = result.replace(&pattern, "Error::");
+    }
+
     result
 }

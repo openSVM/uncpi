@@ -510,6 +510,18 @@ fn transform_body(body: &str, accounts: &[PinocchioAccount], state_structs: &[An
         result = fix_token_amount_access(&result);
     }
 
+    // Fix integer_sqrt method calls (only if exists)
+    // Pattern: (expr).integer_sqrt() -> integer_sqrt(expr)
+    if result.contains(".integer_sqrt") {
+        // Replace various spacing patterns
+        result = result.replace("(amount_a as u128 * amount_b as u128).integer_sqrt()",
+                               "integer_sqrt(amount_a as u128 * amount_b as u128)");
+        result = result.replace("(amount_a as u128 * amount_b as u128) . integer_sqrt ()",
+                               "integer_sqrt(amount_a as u128 * amount_b as u128)");
+        result = result.replace("(amount_a as u128 * amount_b as u128).integer_sqrt ()",
+                               "integer_sqrt(amount_a as u128 * amount_b as u128)");
+    }
+
     // Fix Pubkey comparisons - need to dereference key() for equality checks (only if exists)
     if (result.contains(".key()") || result.contains(".key ()"))
         && (result.contains("==") || result.contains("!="))
@@ -2169,6 +2181,26 @@ fn fix_token_amount_access(body: &str) -> String {
         "user_reward_account",
         "admin_bags",
         "admin_pump",
+        "lottery_vault",
+        "buyer_token_account",
+        "winner_token_account",
+        "seller_payment_account",
+        "buyer_payment_account",
+        "seller_nft_account",
+        "buyer_nft_account",
+        "escrow_nft_account",
+        "stake_vault",
+        "user_reward_token",
+        "token_a_vault",
+        "token_b_vault",
+        "user_token_a",
+        "user_token_b",
+        "user_token_in",
+        "user_token_out",
+        "vault_in",
+        "vault_out",
+        "user_in",
+        "user_out",
     ];
 
     // Process all token accounts with a helper function to reduce allocations
@@ -2188,6 +2220,18 @@ fn fix_token_amount_access(body: &str) -> String {
         if acc != &"user" {
             process_token_field(&mut result, acc, "owner", "get_token_owner");
         }
+    }
+
+    // Handle Mint accounts (.supply field)
+    let mint_accounts = [
+        "lp_mint",
+        "token_a_mint",
+        "token_b_mint",
+        "mint",
+    ];
+
+    for acc in &mint_accounts {
+        process_token_field(&mut result, acc, "supply", "get_mint_supply");
     }
 
     result
