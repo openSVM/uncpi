@@ -16,12 +16,11 @@ pub fn token_transfer_cpi(
         format!(
             r#"// Token transfer with PDA signer
     Transfer {{
-        from: {}.key(),
-        to: {}.key(),
-        authority: {}.key(),
+        from: {},
+        to: {},
+        authority: {},
         amount: {},
     }}.invoke_signed(
-        &[{}.clone(), {}.clone(), {}.clone()],
         &[&[
 {}
         ]],
@@ -31,22 +30,19 @@ pub fn token_transfer_cpi(
             to_account,
             authority,
             amount,
-            from_account,
-            to_account,
-            authority,
             seeds_code.join("\n")
         )
     } else {
         format!(
             r#"// Token transfer
     Transfer {{
-        from: {}.key(),
-        to: {}.key(),
-        authority: {}.key(),
+        from: {},
+        to: {},
+        authority: {},
         amount: {},
-    }}.invoke(&[{}.clone(), {}.clone(), {}.clone()])?;
+    }}.invoke()?;
 "#,
-            from_account, to_account, authority, amount, from_account, to_account, authority
+            from_account, to_account, authority, amount
         )
     }
 }
@@ -65,12 +61,11 @@ pub fn token_mint_to_cpi(
         format!(
             r#"// Mint tokens with PDA signer
     MintTo {{
-        mint: {}.key(),
-        account: {}.key(),
-        mint_authority: {}.key(),
+        mint: {},
+        account: {},
+        mint_authority: {},
         amount: {},
     }}.invoke_signed(
-        &[{}.clone(), {}.clone(), {}.clone()],
         &[&[
 {}
         ]],
@@ -80,22 +75,19 @@ pub fn token_mint_to_cpi(
             to_account,
             authority,
             amount,
-            mint_account,
-            to_account,
-            authority,
             seeds_code.join("\n")
         )
     } else {
         format!(
             r#"// Mint tokens
     MintTo {{
-        mint: {}.key(),
-        account: {}.key(),
-        mint_authority: {}.key(),
+        mint: {},
+        account: {},
+        mint_authority: {},
         amount: {},
-    }}.invoke(&[{}.clone(), {}.clone(), {}.clone()])?;
+    }}.invoke()?;
 "#,
-            mint_account, to_account, authority, amount, mint_account, to_account, authority
+            mint_account, to_account, authority, amount
         )
     }
 }
@@ -110,13 +102,13 @@ pub fn token_burn_cpi(
     format!(
         r#"// Burn tokens
     Burn {{
-        account: {}.key(),
-        mint: {}.key(),
-        authority: {}.key(),
+        account: {},
+        mint: {},
+        authority: {},
         amount: {},
-    }}.invoke(&[{}.clone(), {}.clone(), {}.clone()])?;
+    }}.invoke()?;
 "#,
-        from_account, mint_account, authority, amount, from_account, mint_account, authority
+        from_account, mint_account, authority, amount
     )
 }
 
