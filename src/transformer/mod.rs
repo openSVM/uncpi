@@ -818,6 +818,21 @@ fn replace_state_fields(body: &str, acc_name: &str) -> String {
         result = result.replace(&old_pattern_spaced, &new_pattern);
     }
 
+    // IMPORTANT: Undo any transformations of method calls (not field access)
+    // Methods like .key(), .is_writable() should stay on the AccountInfo, not state
+    let account_methods = ["key", "is_writable", "is_signer", "is_mut"];
+    for method in &account_methods {
+        // Fix both spaced and non-spaced method calls
+        result = result.replace(
+            &format!("{}_state.{} ()", acc_name, method),
+            &format!("{}.{}()", acc_name, method),
+        );
+        result = result.replace(
+            &format!("{}_state.{}()", acc_name, method),
+            &format!("{}.{}()", acc_name, method),
+        );
+    }
+
     // Also replace references like &pool in function calls with &pool_state
     // Pattern: (& pool) or (&pool) when pool is a state account
     result = result.replace(

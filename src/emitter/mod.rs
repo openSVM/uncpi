@@ -1070,7 +1070,7 @@ fn emit_instruction(
                 .push_str("        94, 182, 139, 94, 184, 163, 155, 75, 109, 92, 115, 85, 91,\n");
             content.push_str("        33, 0, 0, 0, 0,\n");
             content.push_str("    ];\n");
-            content.push_str("    if rent_sysvar.key().to_bytes() != RENT_SYSVAR_ID {\n");
+            content.push_str("    if *rent_sysvar.key() != RENT_SYSVAR_ID {\n");
             content.push_str("        return Err(ProgramError::InvalidArgument);\n");
             content.push_str("    }\n\n");
 
