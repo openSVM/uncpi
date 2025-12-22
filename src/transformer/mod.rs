@@ -3,6 +3,67 @@
 use crate::cpi_helpers;
 use crate::ir::*;
 use anyhow::Result;
+use once_cell::sync::Lazy;
+use rayon::prelude::*;
+use regex::Regex;
+
+// Cached regex patterns for performance
+static VEC_WITH_CAPACITY_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"let\s+mut\s+(\w+)\s*=\s*Vec\s*::\s*with_capacity\s*\(\s*(\d+)\s*\)\s*;").unwrap()
+});
+
+static MSG_PATTERN_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"msg\s*!\s*\([^()]*(?:\([^()]*\)[^()]*)*\)\s*;?"#).unwrap()
+});
+
+static CLEANUP_NEWLINES_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"\n\s*\n\s*\n").unwrap()
+});
+
+// Regex for cleaning multiple spaces efficiently
+static MULTIPLE_SPACES_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"\s{2,}").unwrap()
+});
+
+// ULTRA-OPTIMIZED: Single-pass bulk replacer
+use std::collections::HashMap;
+static BULK_REPLACEMENTS: Lazy<Vec<(&'static str, &'static str)>> = Lazy::new(|| {
+    vec![
+        // Spacing fixes
+        (" . ", "."),
+        (" :: ", "::"),
+        ("( )", "()"),
+        ("< ", "<"),
+        (" >", ">"),
+        (" ,", ","),
+        // Comparison operators
+        ("> =", ">="),
+        ("< =", "<="),
+        ("= =", "=="),
+        ("! =", "!="),
+        // Anchor to Pinocchio replacements
+        ("Clock::get()?", "Clock::get()"),
+        ("anchor_lang::error::Error", "ProgramError"),
+        ("anchor_lang::error!", "return Err("),
+        ("anchor_lang::solana_program::hash::hash", "crate::helpers::compute_hash"),
+        ("anchor_lang :: solana_program :: hash :: hash", "crate::helpers::compute_hash"),
+        ("std::cmp::", "core::cmp::"),
+        ("std::mem::", "core::mem::"),
+        // Common error patterns
+        ("StableSwapError :: ", "Error::"),
+        ("StableSwapError::", "Error::"),
+        ("ProtocolError :: ", "Error::"),
+        ("ProtocolError::", "Error::"),
+        ("ProgramError :: ", "Error::"),
+        ("ProgramError::", "Error::"),
+        // Context patterns
+        ("ctx . accounts . ", ""),
+        ("ctx.accounts.", ""),
+        ("ctx . bumps . ", "_bump_"),
+        ("ctx.bumps.", "_bump_"),
+        ("ctx.program_id", "program_id"),
+    ]
+});
 
 pub struct Config {
     pub no_alloc: bool,
@@ -18,9 +79,10 @@ pub fn transform(
     analysis: &ProgramAnalysis,
     config: &Config,
 ) -> Result<PinocchioProgram> {
+    // Parallelize instruction transformation using rayon (uses global thread pool)
     let instructions = anchor
         .instructions
-        .iter()
+        .par_iter()
         .map(|inst| transform_instruction(inst, anchor, analysis, config))
         .collect::<Result<Vec<_>>>()?;
 
@@ -198,12 +260,24 @@ fn transform_constraint_expr(expr: &str, accounts: &[AnchorAccount]) -> String {
 }
 
 fn transform_body(body: &str, accounts: &[PinocchioAccount], config: &Config) -> String {
+    // ULTRA OPTIMIZATION: Early exit for empty/tiny bodies
+    if body.len() < 5 {
+        return body.to_string();
+    }
+
     let mut result = body.to_string();
 
     // Strip outer braces if present
     let trimmed = result.trim();
     if trimmed.starts_with('{') && trimmed.ends_with('}') {
         result = trimmed[1..trimmed.len() - 1].to_string();
+    }
+
+    // OPTIMIZATION: Apply bulk replacements in one pass
+    for (pattern, replacement) in BULK_REPLACEMENTS.iter() {
+        if result.contains(pattern) {
+            result = result.replace(pattern, replacement);
+        }
     }
 
     // Replace ctx.accounts.X with actual account variables
@@ -217,104 +291,116 @@ fn transform_body(body: &str, accounts: &[PinocchioAccount], config: &Config) ->
         let anchor_prefix = format!("ctx . accounts . {}", acc.name);
         let anchor_prefix_compact = format!("ctx.accounts.{}", acc.name);
 
-        // Handle spaced version first (from tokenization)
-        result = result.replace(&anchor_prefix, &acc.name);
-        // Handle compact version
-        result = result.replace(&anchor_prefix_compact, &acc.name);
+        // Only do replacement if pattern exists (performance optimization)
+        if result.contains(&anchor_prefix) {
+            result = result.replace(&anchor_prefix, &acc.name);
+        }
+        if result.contains(&anchor_prefix_compact) {
+            result = result.replace(&anchor_prefix_compact, &acc.name);
+        }
     }
 
     // Also handle any remaining ctx.accounts references generically
-    result = result.replace("ctx . accounts . ", "");
-    result = result.replace("ctx.accounts.", "");
+    if result.contains("ctx . accounts . ") {
+        result = result.replace("ctx . accounts . ", "");
+    }
+    if result.contains("ctx.accounts.") {
+        result = result.replace("ctx.accounts.", "");
+    }
 
     // Replace ctx.bumps.X with bump variables
     for acc in accounts {
         if acc.is_pda {
-            // Handle various spacing patterns
-            result = result.replace(
-                &format!("ctx . bumps . {}", acc.name),
-                &format!("{}_bump", acc.name),
-            );
-            result = result.replace(
-                &format!("ctx.bumps.{}", acc.name),
-                &format!("{}_bump", acc.name),
-            );
+            let bump_spaced = format!("ctx . bumps . {}", acc.name);
+            let bump_compact = format!("ctx.bumps.{}", acc.name);
+            let replacement = format!("{}_bump", acc.name);
+
+            // Handle various spacing patterns (only if exists)
+            if result.contains(&bump_spaced) {
+                result = result.replace(&bump_spaced, &replacement);
+            }
+            if result.contains(&bump_compact) {
+                result = result.replace(&bump_compact, &replacement);
+            }
         }
     }
 
     // Also handle any generic ctx.bumps references
-    result = result.replace("ctx . bumps . ", "_bump_");
-    result = result.replace("ctx.bumps.", "_bump_");
-
-    // Replace ctx.program_id with program_id
-    result = result.replace("ctx.program_id", "program_id");
-
-    // Transform state access patterns
-    result = transform_state_access(&result, accounts);
-
-    // Replace CPI patterns
-    if config.inline_cpi {
-        result = inline_cpi_calls(&result);
-    } else {
-        result = transform_cpi_calls(&result);
+    if result.contains("ctx . bumps . ") {
+        result = result.replace("ctx . bumps . ", "_bump_");
+    }
+    if result.contains("ctx.bumps.") {
+        result = result.replace("ctx.bumps.", "_bump_");
     }
 
-    // Replace require! macro
-    result = transform_require_macro(&result);
+    // Replace ctx.program_id with program_id
+    if result.contains("ctx.program_id") {
+        result = result.replace("ctx.program_id", "program_id");
+    }
 
-    // Replace require_keys_eq! macro
-    result = transform_require_keys_eq(&result);
+    // Transform state access patterns (only if state access exists)
+    if result.contains(".load") {
+        result = transform_state_access(&result, accounts);
+    }
 
-    // Fix multi-line msg! macros by joining them
-    result = fix_multiline_msg(&result);
+    // Replace CPI patterns (only if CPI calls exist)
+    if result.contains("CpiContext") || result.contains("token::") || result.contains("system_program::") {
+        if config.inline_cpi {
+            result = inline_cpi_calls(&result);
+        } else {
+            result = transform_cpi_calls(&result);
+        }
+    }
 
-    // Replace Clock::get()? with Clock::get()
-    result = result.replace("Clock::get()?", "Clock::get()");
+    // Replace require! macro (only if exists)
+    if result.contains("require!") || result.contains("require !") {
+        result = transform_require_macro(&result);
+    }
 
-    // Replace anchor error types
-    result = result.replace("anchor_lang::error::Error", "ProgramError");
-    result = result.replace("anchor_lang::error!", "return Err(");
-    // Replace anchor_lang hashing with a helper function call
-    // We'll add compute_hash to helpers.rs
-    // Handle both spaced and non-spaced versions
-    result = result.replace(
-        "anchor_lang::solana_program::hash::hash",
-        "crate::helpers::compute_hash",
-    );
-    result = result.replace(
-        "anchor_lang :: solana_program :: hash :: hash",
-        "crate::helpers::compute_hash",
-    );
+    // Replace require_keys_eq! macro (only if exists)
+    if result.contains("require_keys_eq") {
+        result = transform_require_keys_eq(&result);
+    }
 
-    // Replace program-specific error enum names with generic Error
-    // Common Anchor error naming conventions (with and without spaces)
-    result = result.replace("StableSwapError :: ", "Error::");
-    result = result.replace("StableSwapError::", "Error::");
-    result = result.replace("ProtocolError :: ", "Error::");
-    result = result.replace("ProtocolError::", "Error::");
-    result = result.replace("ProgramError :: ", "Error::");
-    result = result.replace("ProgramError::", "Error::");
+    // Fix multi-line msg! macros by joining them (only if msg exists)
+    if result.contains("msg!") {
+        result = fix_multiline_msg(&result);
+    }
 
     // Replace emit! macro (events)
-    result = transform_emit_macro(&result);
+    if result.contains("emit!") {
+        result = transform_emit_macro(&result);
+    }
 
     // Clean up the entire body first so patterns are normalized
-    result = clean_spaces(&result);
+    if result.contains("  ") {
+        result = clean_spaces(&result);
+    }
 
     // NOW do state access transformation (after clean_spaces normalizes patterns)
-    result = transform_state_access_final(&result);
+    if result.contains("pool.") || result.contains("farming_period.") || result.contains("position.") {
+        result = transform_state_access_final(&result);
+    }
 
-    // Fix Pubkey field assignments - need to dereference .key()
-    result = fix_pubkey_assignments(&result);
+    // Fix Pubkey field assignments - need to dereference .key() (only if assignment exists)
+    if result.contains(".key()") && result.contains(" = ") {
+        result = fix_pubkey_assignments(&result);
+    }
 
-    // Fix token account .amount access - use get_token_balance()
-    result = fix_token_amount_access(&result);
+    // Fix token account .amount access - use get_token_balance() (only if exists)
+    if result.contains(".amount") {
+        result = fix_token_amount_access(&result);
+    }
 
-    // Fix Pubkey comparisons - need to dereference key() for equality checks
-    result = fix_pubkey_comparisons(&result);
+    // Fix Pubkey comparisons - need to dereference key() for equality checks (only if exists)
+    if result.contains(".key()") && (result.contains("==") || result.contains("!=")) {
+        result = fix_pubkey_comparisons(&result);
+    }
 
-    // Fix signer_seeds pattern for PDA signing
-    result = fix_signer_seeds(&result);
+    // Fix signer_seeds pattern for PDA signing (only if seeds exist)
+    if result.contains("signer_seeds") || result.contains("seeds") {
+        result = fix_signer_seeds(&result);
+    }
 
     // Strip msg!() calls if no_logs is enabled
     if config.no_logs {
@@ -322,11 +408,9 @@ fn transform_body(body: &str, accounts: &[PinocchioAccount], config: &Config) ->
     }
 
     // Replace Vec with fixed arrays for no_std compatibility
-    result = replace_vec_with_array(&result);
-
-    // Replace std:: with core:: for no_std compatibility
-    result = result.replace("std::cmp::", "core::cmp::");
-    result = result.replace("std::mem::", "core::mem::");
+    if result.contains("Vec") {
+        result = replace_vec_with_array(&result);
+    }
 
     // Use unchecked math if enabled (smaller binary, but no overflow checks)
     if config.unsafe_math {
@@ -356,18 +440,11 @@ fn use_unchecked_math(body: &str) -> String {
 
 /// Replace Vec patterns with fixed-size arrays for no_std compatibility
 fn replace_vec_with_array(body: &str) -> String {
-    use regex::Regex;
-
     let mut result = body.to_string();
 
-    // Pattern: let mut data = Vec :: with_capacity ( 48 ) ; (with arbitrary spacing)
-    let vec_pattern =
-        Regex::new(r"let\s+mut\s+(\w+)\s*=\s*Vec\s*::\s*with_capacity\s*\(\s*(\d+)\s*\)\s*;")
-            .unwrap();
-
-    // First pass: extract info
+    // First pass: extract info using cached regex
     let captures_data: Option<(String, usize, String)> =
-        vec_pattern.captures(&result).map(|caps| {
+        VEC_WITH_CAPACITY_RE.captures(&result).map(|caps| {
             let var_name = caps.get(1).unwrap().as_str().to_string();
             let capacity: usize = caps.get(2).unwrap().as_str().parse().unwrap_or(48);
             let old_decl = caps.get(0).unwrap().as_str().to_string();
@@ -433,21 +510,20 @@ fn replace_vec_with_array(body: &str) -> String {
 
 /// Strip msg!() calls for smaller binary size
 fn strip_msg_calls(body: &str) -> String {
-    use regex::Regex;
-
-    // Match msg!(...) with balanced parentheses, including trailing semicolon
-    // This regex matches msg! followed by balanced parentheses
-    let msg_pattern = Regex::new(r#"msg\s*!\s*\([^()]*(?:\([^()]*\)[^()]*)*\)\s*;?"#).unwrap();
-
-    let result = msg_pattern.replace_all(body, "").to_string();
+    // Use cached regex patterns
+    let result = MSG_PATTERN_RE.replace_all(body, "").to_string();
 
     // Clean up any double newlines left behind
-    let cleanup = Regex::new(r"\n\s*\n\s*\n").unwrap();
-    cleanup.replace_all(&result, "\n\n").to_string()
+    CLEANUP_NEWLINES_RE.replace_all(&result, "\n\n").to_string()
 }
 
 /// Final pass to add state deserialization (runs after clean_spaces)
 fn transform_state_access_final(body: &str) -> String {
+    // Early exit if body is very short
+    if body.len() < 20 {
+        return body.to_string();
+    }
+
     let mut result = body.to_string();
 
     // Patterns for state accounts and their types
@@ -459,28 +535,35 @@ fn transform_state_access_final(body: &str) -> String {
     ];
 
     // Handle alias patterns - replace period with farming_period, etc BEFORE detection
-    // So we can detect field accesses properly
-    // These are created by lines like: let period = &mut farming_period;
-    result = result.replace("let period = & mut farming_period ;", "");
-    result = result.replace("let period = &mut farming_period;", "");
-    result = result.replace("let position = & mut user_position ;", "");
-    result = result.replace("let position = &mut user_position;", "");
-    result = result.replace("let pool = & mut pool ;", "");
-    result = result.replace("let pool = &mut pool;", "");
+    // (Only if patterns exist - performance optimization)
+    if result.contains("let period") {
+        result = result.replace("let period = & mut farming_period ;", "");
+        result = result.replace("let period = &mut farming_period;", "");
+    }
+    if result.contains("let position") {
+        result = result.replace("let position = & mut user_position ;", "");
+        result = result.replace("let position = &mut user_position;", "");
+    }
+    if result.contains("let pool") {
+        result = result.replace("let pool = & mut pool ;", "");
+        result = result.replace("let pool = &mut pool;", "");
+    }
 
     // Replace alias usages with the actual account name BEFORE field detection
-    // So that farming_period. pattern can be detected
-    let mut lines: Vec<String> = result.lines().map(String::from).collect();
-    for line in &mut lines {
-        // Only replace standalone period. not farming_period.
-        if line.contains("period.") && !line.contains("farming_period.") {
-            *line = line.replace("period.", "farming_period.");
+    // Only do this if the patterns exist (performance optimization)
+    if result.contains("period.") || result.contains("position.") {
+        let mut lines: Vec<String> = result.lines().map(String::from).collect();
+        for line in &mut lines {
+            // Only replace standalone period. not farming_period.
+            if line.contains("period.") && !line.contains("farming_period.") {
+                *line = line.replace("period.", "farming_period.");
+            }
+            if line.contains("position.") && !line.contains("user_position.") {
+                *line = line.replace("position.", "user_position.");
+            }
         }
-        if line.contains("position.") && !line.contains("user_position.") {
-            *line = line.replace("position.", "user_position.");
-        }
+        result = lines.join("\n");
     }
-    result = lines.join("\n");
 
     // Check which state accounts need deserialization
     let mut needs_deser: Vec<(&str, &str)> = Vec::new();
@@ -1672,23 +1755,19 @@ fn find_last_comma(s: &str) -> Option<usize> {
 
 /// Clean up extra spaces from tokenization
 fn clean_spaces(s: &str) -> String {
-    let mut result = s.to_string();
-    // Fix operators with spaces
-    result = result.replace(" . ", ".");
-    result = result.replace(" :: ", "::");
-    result = result.replace("( )", "()");
-    result = result.replace("< ", "<");
-    result = result.replace(" >", ">");
-    result = result.replace(" ,", ",");
-    // Fix comparison operators
-    result = result.replace("> =", ">=");
-    result = result.replace("< =", "<=");
-    result = result.replace("= =", "==");
-    result = result.replace("! =", "!=");
-    // Clean multiple spaces
-    while result.contains("  ") {
-        result = result.replace("  ", " ");
+    // Early exit if string is small or doesn't need cleaning
+    if s.len() < 10 {
+        return s.trim().to_string();
     }
+
+    // OPTIMIZATION: Most replacements already done in BULK_REPLACEMENTS
+    // Only clean multiple spaces here with regex (O(n) instead of O(n²))
+    let result = if s.contains("  ") {
+        MULTIPLE_SPACES_RE.replace_all(s, " ").to_string()
+    } else {
+        s.to_string()
+    };
+
     result.trim().to_string()
 }
 

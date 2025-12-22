@@ -16,7 +16,7 @@ mod transformer;
     about = "\"ok unc, let me show you how to optimize\" - Transpile Anchor to Pinocchio for 85%+ size reduction"
 )]
 struct Args {
-    /// Input Anchor program (lib.rs)
+    /// Input Anchor program (can be a lib.rs file or a program directory)
     #[arg(required = true)]
     input: PathBuf,
 
@@ -66,19 +66,54 @@ struct Args {
 }
 
 fn main() -> Result<()> {
+    // Configure rayon thread pool to use 75% of available cores globally
+    let num_cores = num_cpus::get();
+    let target_threads = (num_cores as f32 * 0.75).ceil() as usize;
+
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(target_threads)
+        .build_global()
+        .ok(); // Ignore if already initialized
+
     let args = Args::parse();
+
+    // Resolve input path - if it's a directory, look for src/lib.rs
+    let input_file = if args.input.is_dir() {
+        let lib_path = args.input.join("src").join("lib.rs");
+        if !lib_path.exists() {
+            anyhow::bail!(
+                "Input is a directory but src/lib.rs not found. Expected: {:?}",
+                lib_path
+            );
+        }
+        lib_path
+    } else {
+        args.input.clone()
+    };
+
+    // Resolve output path - if input was a folder, derive output name from folder
+    let output_dir = if args.output == std::path::PathBuf::from("output") && args.input.is_dir() {
+        // Default output case - create a better default based on input folder name
+        let folder_name = args.input
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("output");
+        std::path::PathBuf::from("/tmp").join(format!("{}-pino", folder_name))
+    } else {
+        args.output.clone()
+    };
 
     if args.verbose {
         println!("uncpi v{}", env!("CARGO_PKG_VERSION"));
-        println!("Input:  {:?}", args.input);
-        println!("Output: {:?}", args.output);
+        println!("Input:  {:?}", input_file);
+        println!("Output: {:?}", output_dir);
     }
 
     // Phase 1: Parse Anchor source
     if args.verbose {
         println!("\n[1/4] Parsing Anchor program...");
     }
-    let anchor_program = parser::parse_anchor_file(&args.input)?;
+    let anchor_program = parser::parse_anchor_file(&input_file)?;
 
     if args.verbose {
         println!("  Found {} instructions", anchor_program.instructions.len());
@@ -121,7 +156,7 @@ fn main() -> Result<()> {
     if args.verbose {
         println!("\n[3.5/4] Extracting constants and helpers...");
     }
-    let extras = parser::parse_extras(&args.input)?;
+    let extras = parser::parse_extras(&input_file)?;
     if args.verbose {
         println!("  Constants: {}", extras.constants.len());
         println!("  Helper functions: {}", extras.helper_functions.len());
@@ -131,7 +166,7 @@ fn main() -> Result<()> {
     if args.verbose {
         println!("\n[4/4] Emitting Pinocchio code...");
     }
-    emitter::emit_with_extras(&pinocchio_ir, &args.output, Some(&extras))?;
+    emitter::emit_with_extras(&pinocchio_ir, &output_dir, Some(&extras))?;
 
     // Phase 5: Generate IDL if requested
     if args.idl || args.verify_idl.is_some() {
@@ -139,7 +174,7 @@ fn main() -> Result<()> {
             println!("\n[5/5] Generating IDL...");
         }
         let idl = idl::generate_idl(&pinocchio_ir, args.program_id.as_deref());
-        let idl_path = args.output.join("idl.json");
+        let idl_path = output_dir.join("idl.json");
         let idl_json = serde_json::to_string_pretty(&idl)?;
         std::fs::write(&idl_path, &idl_json)?;
         if args.verbose {
@@ -176,9 +211,9 @@ fn main() -> Result<()> {
         }
     }
 
-    println!("\nSuccess! Pinocchio program written to {:?}", args.output);
+    println!("\nSuccess! Pinocchio program written to {:?}", output_dir);
     println!("\nNext steps:");
-    println!("  1. cd {:?}", args.output);
+    println!("  1. cd {:?}", output_dir);
     println!("  2. cargo build-sbf");
     println!("  3. Compare .so sizes!");
 

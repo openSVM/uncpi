@@ -33,7 +33,63 @@ pub fn parse_anchor_file(path: &Path) -> Result<AnchorProgram> {
     let content =
         std::fs::read_to_string(path).with_context(|| format!("Failed to read {:?}", path))?;
 
-    parse_anchor_source(&content)
+    // Try to resolve and inline module files
+    let expanded_content = expand_modules(&content, path)?;
+
+    parse_anchor_source(&expanded_content)
+}
+
+/// Expand `mod xyz;` declarations by inlining the module file contents
+fn expand_modules(source: &str, base_path: &Path) -> Result<String> {
+    use syn::Item;
+
+    let file = match parse_file(source) {
+        Ok(f) => f,
+        Err(_) => return Ok(source.to_string()), // Return original if parsing fails
+    };
+
+    let mut result = String::new();
+    let base_dir = base_path.parent().unwrap_or(Path::new("."));
+
+    for item in &file.items {
+        match item {
+            Item::Mod(item_mod) if item_mod.content.is_none() => {
+                // This is a `mod xyz;` declaration without inline content
+                let mod_name = item_mod.ident.to_string();
+
+                // Try to find the module file (xyz.rs or xyz/mod.rs)
+                let mod_file = base_dir.join(format!("{}.rs", mod_name));
+                let mod_dir_file = base_dir.join(&mod_name).join("mod.rs");
+
+                let mod_content = if mod_file.exists() {
+                    std::fs::read_to_string(&mod_file)
+                        .with_context(|| format!("Failed to read module file: {:?}", mod_file))?
+                } else if mod_dir_file.exists() {
+                    std::fs::read_to_string(&mod_dir_file)
+                        .with_context(|| format!("Failed to read module file: {:?}", mod_dir_file))?
+                } else {
+                    // Module file not found, keep the original declaration
+                    result.push_str(&item.to_token_stream().to_string());
+                    result.push('\n');
+                    continue;
+                };
+
+                // Recursively expand modules in the loaded file
+                let mod_path = if mod_file.exists() { &mod_file } else { &mod_dir_file };
+                let expanded_mod = expand_modules(&mod_content, mod_path)?;
+
+                // Inline the module content
+                result.push_str(&format!("mod {} {{\n{}\n}}\n", mod_name, expanded_mod));
+            }
+            _ => {
+                // Keep other items as-is
+                result.push_str(&item.to_token_stream().to_string());
+                result.push('\n');
+            }
+        }
+    }
+
+    Ok(result)
 }
 
 /// Parse source and extract constants and helper functions
@@ -41,7 +97,10 @@ pub fn parse_extras(path: &Path) -> Result<SourceExtras> {
     let content =
         std::fs::read_to_string(path).with_context(|| format!("Failed to read {:?}", path))?;
 
-    let file = parse_file(&content).with_context(|| "Failed to parse Rust source")?;
+    // Expand modules to get full source
+    let expanded_content = expand_modules(&content, path)?;
+
+    let file = parse_file(&expanded_content).with_context(|| "Failed to parse Rust source")?;
 
     let mut extras = SourceExtras::default();
 

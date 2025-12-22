@@ -24,6 +24,21 @@ cargo test -- --nocapture
 # Run a specific test
 cargo test test_transpiler_runs
 
+# Run a specific test by name pattern
+cargo test discriminator
+
+# Check code with clippy
+cargo clippy
+
+# Fix clippy warnings automatically
+cargo clippy --fix
+
+# Format code
+cargo fmt
+
+# Check formatting without changing files
+cargo fmt -- --check
+
 # Install locally
 cargo install --path .
 
@@ -32,6 +47,10 @@ cargo run -- input.rs -o output/
 
 # Run with verbose output
 cargo run -- input.rs -o output/ --verbose
+
+# Build Pinocchio output with Solana toolchain
+cd output/
+cargo build-sbf
 ```
 
 ## CLI Usage
@@ -63,7 +82,9 @@ The transpiler follows a four-phase pipeline:
 ### 1. Parser (`src/parser/mod.rs`)
 - Parses Anchor source code using `syn` crate
 - Extracts program metadata, instructions, account structs, and state structs
-- Extracts constants and helper functions via `parse_extras()`
+- Two parsing functions:
+  - `parse_anchor_file()` → `AnchorProgram` IR (main program structure)
+  - `parse_extras()` → `SourceExtras` (constants, helper functions to preserve)
 - Outputs: `AnchorProgram` IR + `SourceExtras`
 
 ### 2. Analyzer (`src/analyzer/mod.rs`)
@@ -166,3 +187,15 @@ Tests reference external test files (see `get_test_input()` in tests), so some m
 - Generate human-readable output with proper formatting (prettyplease)
 - Keep IR types serializable for debugging
 - Verbose mode should show phase-by-phase progress
+- Run `cargo fmt` before committing
+- Ensure `cargo clippy` passes without warnings
+
+## Release Process
+
+For creating releases and publishing to crates.io, see `.github/RELEASE.md`.
+
+Quick summary:
+1. Update version in `Cargo.toml`
+2. Commit changes
+3. Create and push a git tag (e.g., `v0.1.1`)
+4. CI automatically builds binaries and publishes to crates.io
