@@ -65,8 +65,9 @@ fn expand_modules(source: &str, base_path: &Path) -> Result<String> {
                     std::fs::read_to_string(&mod_file)
                         .with_context(|| format!("Failed to read module file: {:?}", mod_file))?
                 } else if mod_dir_file.exists() {
-                    std::fs::read_to_string(&mod_dir_file)
-                        .with_context(|| format!("Failed to read module file: {:?}", mod_dir_file))?
+                    std::fs::read_to_string(&mod_dir_file).with_context(|| {
+                        format!("Failed to read module file: {:?}", mod_dir_file)
+                    })?
                 } else {
                     // Module file not found, keep the original declaration
                     result.push_str(&item.to_token_stream().to_string());
@@ -75,7 +76,11 @@ fn expand_modules(source: &str, base_path: &Path) -> Result<String> {
                 };
 
                 // Recursively expand modules in the loaded file
-                let mod_path = if mod_file.exists() { &mod_file } else { &mod_dir_file };
+                let mod_path = if mod_file.exists() {
+                    &mod_file
+                } else {
+                    &mod_dir_file
+                };
                 let expanded_mod = expand_modules(&mod_content, mod_path)?;
 
                 // Inline the module content
@@ -343,7 +348,12 @@ fn extract_generic(ty_str: &str, wrapper: &str) -> String {
         if let Some(end) = rest.rfind('>') {
             let inner = &rest[..end];
             if inner.contains(',') {
-                return inner.split(',').next_back().unwrap_or(inner).trim().to_string();
+                return inner
+                    .split(',')
+                    .next_back()
+                    .unwrap_or(inner)
+                    .trim()
+                    .to_string();
             }
             return inner.trim().to_string();
         }
@@ -360,7 +370,6 @@ fn parse_account_constraints(attrs: &[Attribute]) -> Vec<AccountConstraint> {
         }
 
         let tokens = attr_to_string(attr);
-
 
         if tokens.contains("mut") {
             constraints.push(AccountConstraint::Mut);

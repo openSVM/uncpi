@@ -12,18 +12,13 @@ static VEC_WITH_CAPACITY_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"let\s+mut\s+(\w+)\s*=\s*Vec\s*::\s*with_capacity\s*\(\s*(\d+)\s*\)\s*;").unwrap()
 });
 
-static MSG_PATTERN_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"msg\s*!\s*\([^()]*(?:\([^()]*\)[^()]*)*\)\s*;?"#).unwrap()
-});
+static MSG_PATTERN_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"msg\s*!\s*\([^()]*(?:\([^()]*\)[^()]*)*\)\s*;?"#).unwrap());
 
-static CLEANUP_NEWLINES_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\n\s*\n\s*\n").unwrap()
-});
+static CLEANUP_NEWLINES_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\n\s*\n\s*\n").unwrap());
 
 // Regex for cleaning multiple spaces efficiently
-static MULTIPLE_SPACES_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"[ \t]{2,}").unwrap()
-});
+static MULTIPLE_SPACES_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"[ \t]{2,}").unwrap());
 
 /// ULTRA-OPTIMIZED: Single-pass bulk replacer
 static BULK_REPLACEMENTS: Lazy<Vec<(&'static str, &'static str)>> = Lazy::new(|| {
@@ -44,8 +39,14 @@ static BULK_REPLACEMENTS: Lazy<Vec<(&'static str, &'static str)>> = Lazy::new(||
         ("Clock::get()?", "Clock::get()"),
         ("anchor_lang::error::Error", "ProgramError"),
         ("anchor_lang::error!", "return Err("),
-        ("anchor_lang::solana_program::hash::hash", "crate::helpers::compute_hash"),
-        ("anchor_lang :: solana_program :: hash :: hash", "crate::helpers::compute_hash"),
+        (
+            "anchor_lang::solana_program::hash::hash",
+            "crate::helpers::compute_hash",
+        ),
+        (
+            "anchor_lang :: solana_program :: hash :: hash",
+            "crate::helpers::compute_hash",
+        ),
         ("std::cmp::", "core::cmp::"),
         ("std::mem::", "core::mem::"),
         // Common error patterns
@@ -284,10 +285,7 @@ fn transform_constraint_expr(expr: &str, accounts: &[AnchorAccount]) -> String {
         // Replace acc.key() with *accounts[idx].key() (dereference for comparison)
         let key_pattern = format!("{}.key()", acc.name);
         if result.contains(&key_pattern) {
-            result = result.replace(
-                &key_pattern,
-                &format!("*{}.key()", acc.name),
-            );
+            result = result.replace(&key_pattern, &format!("*{}.key()", acc.name));
         }
 
         // Replace acc.field with acc_state.field for state access
@@ -382,7 +380,10 @@ fn transform_body(body: &str, accounts: &[PinocchioAccount], config: &Config) ->
     }
 
     // Replace CPI patterns (only if CPI calls exist)
-    if result.contains("CpiContext") || result.contains("token::") || result.contains("system_program::") {
+    if result.contains("CpiContext")
+        || result.contains("token::")
+        || result.contains("system_program::")
+    {
         if config.inline_cpi {
             result = inline_cpi_calls(&result);
         } else {
@@ -416,7 +417,10 @@ fn transform_body(body: &str, accounts: &[PinocchioAccount], config: &Config) ->
     }
 
     // NOW do state access transformation (after clean_spaces normalizes patterns)
-    if result.contains("pool.") || result.contains("farming_period.") || result.contains("position.") {
+    if result.contains("pool.")
+        || result.contains("farming_period.")
+        || result.contains("position.")
+    {
         result = transform_state_access_final(&result);
     }
 
@@ -431,7 +435,9 @@ fn transform_body(body: &str, accounts: &[PinocchioAccount], config: &Config) ->
     }
 
     // Fix Pubkey comparisons - need to dereference key() for equality checks (only if exists)
-    if (result.contains(".key()") || result.contains(".key ()")) && (result.contains("==") || result.contains("!=")) {
+    if (result.contains(".key()") || result.contains(".key ()"))
+        && (result.contains("==") || result.contains("!="))
+    {
         result = fix_pubkey_comparisons(&result);
     }
 
@@ -2029,18 +2035,18 @@ fn fix_pubkey_assignments(body: &str) -> String {
         // Pattern: _state.field = acc.key () ;
         result = result.replace(
             &format!("_state.{} = ", field),
-            &format!("_state.{} = *", field)
+            &format!("_state.{} = *", field),
         );
         result = result.replace(
             &format!("period.{} = ", field),
-            &format!("period.{} = *", field)
+            &format!("period.{} = *", field),
         );
     }
 
     // Clean up double asterisks that might have been created
     result = result.replace(" = **", " = *");
-    result = result.replace(" = *Pubkey", " = Pubkey");  // Don't dereference Pubkey::default()
-    result = result.replace(" = *0", " = 0");  // Don't dereference numbers
+    result = result.replace(" = *Pubkey", " = Pubkey"); // Don't dereference Pubkey::default()
+    result = result.replace(" = *0", " = 0"); // Don't dereference numbers
 
     // Fix Some(reference) patterns for Optional pubkey fields
     // Pattern: Some (new_authority) -> Some (*new_authority)

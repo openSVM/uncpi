@@ -630,13 +630,20 @@ fn emit_instruction(
         || inst.body.contains("Transfer")
         || inst.body.contains("mint_to")
         || inst.body.contains("burn")
-        || inst.accounts.iter().any(|acc| acc.is_init && acc.token_mint.is_some());
+        || inst
+            .accounts
+            .iter()
+            .any(|acc| acc.is_init && acc.token_mint.is_some());
 
     if needs_token_imports {
         let mut imports = vec!["Transfer", "MintTo", "Burn"];
 
         // Add InitializeAccount2 if we're initializing token accounts
-        if inst.accounts.iter().any(|acc| acc.is_init && acc.token_mint.is_some()) {
+        if inst
+            .accounts
+            .iter()
+            .any(|acc| acc.is_init && acc.token_mint.is_some())
+        {
             imports.push("InitializeAccount2");
         }
 
@@ -669,7 +676,8 @@ fn emit_instruction(
             // Check if any account fields are referenced that would require this state type
             for acc in &inst.accounts {
                 if state.name.to_lowercase().contains(&acc.name.to_lowercase())
-                    && validation_str.contains(&format!("{} . ", acc.name)) {
+                    && validation_str.contains(&format!("{} . ", acc.name))
+                {
                     imported_states.insert(state.name.clone());
                 }
             }
@@ -682,9 +690,10 @@ fn emit_instruction(
     content.push('\n');
 
     // Check if we need Rent sysvar for token account initialization
-    let needs_rent_sysvar = inst.accounts.iter().any(|acc| {
-        acc.is_init && acc.token_mint.is_some()
-    });
+    let needs_rent_sysvar = inst
+        .accounts
+        .iter()
+        .any(|acc| acc.is_init && acc.token_mint.is_some());
 
     let rent_sysvar_index = if needs_rent_sysvar {
         inst.accounts.len()
@@ -703,7 +712,10 @@ fn emit_instruction(
             ));
         }
         if needs_rent_sysvar {
-            content.push_str(&format!("const RENT_SYSVAR: usize = {};\n", rent_sysvar_index));
+            content.push_str(&format!(
+                "const RENT_SYSVAR: usize = {};\n",
+                rent_sysvar_index
+            ));
         }
         content.push('\n');
     }
@@ -790,13 +802,15 @@ fn emit_instruction(
         for acc in &inst.accounts {
             // Check if this account has a state type
             // Match if account name is contained in state name (e.g., "pool" in "StablePool")
-            let has_state_type = program.state_structs.iter().any(|s| {
-                s.name.to_lowercase().contains(&acc.name.to_lowercase())
-            });
-            if has_state_type && validation_str.contains(&format!("{} . ", acc.name)) {
-                if !state_accounts_to_deserialize.contains(&acc.name) {
-                    state_accounts_to_deserialize.push(acc.name.clone());
-                }
+            let has_state_type = program
+                .state_structs
+                .iter()
+                .any(|s| s.name.to_lowercase().contains(&acc.name.to_lowercase()));
+            if has_state_type
+                && validation_str.contains(&format!("{} . ", acc.name))
+                && !state_accounts_to_deserialize.contains(&acc.name)
+            {
+                state_accounts_to_deserialize.push(acc.name.clone());
             }
         }
     }
@@ -805,9 +819,11 @@ fn emit_instruction(
         content.push_str("    // Deserialize state accounts needed for validation\n");
         for acc_name in &state_accounts_to_deserialize {
             // Find the matching state struct (account name should be contained in state name)
-            if let Some(state) = program.state_structs.iter().find(|s| {
-                s.name.to_lowercase().contains(&acc_name.to_lowercase())
-            }) {
+            if let Some(state) = program
+                .state_structs
+                .iter()
+                .find(|s| s.name.to_lowercase().contains(&acc_name.to_lowercase()))
+            {
                 content.push_str(&format!(
                     "    let {}_state = {}::from_account_info({})?;\n",
                     acc_name, state.name, acc_name
@@ -890,7 +906,8 @@ fn emit_instruction(
                     for state_acc in &state_accounts_to_deserialize {
                         let pattern = format!("{} . ", state_acc);
                         if transformed_bump.contains(&pattern) {
-                            transformed_bump = transformed_bump.replace(&pattern, &format!("{}_state.", state_acc));
+                            transformed_bump = transformed_bump
+                                .replace(&pattern, &format!("{}_state.", state_acc));
                         }
                     }
                     seeds_code.push(format!("&[{}]", transformed_bump));
@@ -901,9 +918,12 @@ fn emit_instruction(
 
                 // Check if this PDA references its own state fields (self-referential)
                 // Check in ORIGINAL seeds OR bump for the pattern "accountname . "
-                let is_self_referential = seeds.iter().any(|s| {
-                    s.contains(&format!("{} . ", acc.name))
-                }) || bump.as_ref().map_or(false, |b| b.contains(&format!("{} . ", acc.name)));
+                let is_self_referential = seeds
+                    .iter()
+                    .any(|s| s.contains(&format!("{} . ", acc.name)))
+                    || bump
+                        .as_ref()
+                        .is_some_and(|b| b.contains(&format!("{} . ", acc.name)));
 
                 // If account is being initialized, self-referential, or bump not provided, use find_program_address
                 if acc.is_init || bump.is_none() || is_self_referential {
@@ -912,7 +932,9 @@ fn emit_instruction(
                     let mut find_seeds = seeds_code.clone();
                     if let Some(last) = find_seeds.last() {
                         // Remove if it's a bump seed (contains .bump or is a byte array reference)
-                        if last.contains(".bump") || (last.starts_with("&[") && !last.contains("b\"")) {
+                        if last.contains(".bump")
+                            || (last.starts_with("&[") && !last.contains("b\""))
+                        {
                             find_seeds.pop();
                         }
                     }
@@ -951,25 +973,26 @@ fn emit_instruction(
                 let mut transformed_code = code.clone();
                 for state_acc in &state_accounts_to_deserialize {
                     let pattern = format!("{} . ", state_acc);
-                    transformed_code = transformed_code.replace(&pattern, &format!("{}_state.", state_acc));
+                    transformed_code =
+                        transformed_code.replace(&pattern, &format!("{}_state.", state_acc));
                 }
 
                 // Transform token account field access: account.mint -> get_token_mint(account)?
                 for acc in &inst.accounts {
                     // Check if this looks like a token account (commonly named with token types)
-                    let is_token_account = acc.name.contains("user_") ||
-                                          acc.name.contains("_token") ||
-                                          acc.name == "position" ||
-                                          acc.token_mint.is_some();
+                    let is_token_account = acc.name.contains("user_")
+                        || acc.name.contains("_token")
+                        || acc.name == "position"
+                        || acc.token_mint.is_some();
 
                     if is_token_account {
                         transformed_code = transformed_code.replace(
                             &format!("{} . mint", acc.name),
-                            &format!("get_token_mint({})?", acc.name)
+                            &format!("get_token_mint({})?", acc.name),
                         );
                         transformed_code = transformed_code.replace(
                             &format!("{} . owner", acc.name),
-                            &format!("get_token_owner({})?", acc.name)
+                            &format!("get_token_owner({})?", acc.name),
                         );
                     }
                 }
@@ -980,19 +1003,19 @@ fn emit_instruction(
                     // Pattern: == account.key () -> == *account.key()
                     transformed_code = transformed_code.replace(
                         &format!(" == {} . key ()", acc.name),
-                        &format!(" == *{}.key()", acc.name)
+                        &format!(" == *{}.key()", acc.name),
                     );
                     transformed_code = transformed_code.replace(
                         &format!(" != {} . key ()", acc.name),
-                        &format!(" != *{}.key()", acc.name)
+                        &format!(" != *{}.key()", acc.name),
                     );
                     transformed_code = transformed_code.replace(
                         &format!("{} . key () == ", acc.name),
-                        &format!("*{}.key() == ", acc.name)
+                        &format!("*{}.key() == ", acc.name),
                     );
                     transformed_code = transformed_code.replace(
                         &format!("{} . key () != ", acc.name),
-                        &format!("*{}.key() != ", acc.name)
+                        &format!("*{}.key() != ", acc.name),
                     );
                 }
 
@@ -1040,8 +1063,11 @@ fn emit_instruction(
             // Verify rent sysvar address
             content.push_str("    // Verify Rent sysvar\n");
             content.push_str("    const RENT_SYSVAR_ID: [u8; 32] = [\n");
-            content.push_str("        6, 167, 213, 23, 24, 199, 116, 201, 40, 86, 99, 152, 105, 29,\n");
-            content.push_str("        94, 182, 139, 94, 184, 163, 155, 75, 109, 92, 115, 85, 91,\n");
+            content.push_str(
+                "        6, 167, 213, 23, 24, 199, 116, 201, 40, 86, 99, 152, 105, 29,\n",
+            );
+            content
+                .push_str("        94, 182, 139, 94, 184, 163, 155, 75, 109, 92, 115, 85, 91,\n");
             content.push_str("        33, 0, 0, 0, 0,\n");
             content.push_str("    ];\n");
             content.push_str("    if rent_sysvar.key().to_bytes() != RENT_SYSVAR_ID {\n");
@@ -1051,9 +1077,13 @@ fn emit_instruction(
             // Add create_account CPI if this is a PDA (needs to be created)
             if acc.is_pda && acc.pda_seeds.is_some() {
                 content.push_str("    // Create PDA account for token account\n");
-                content.push_str("    const TOKEN_ACCOUNT_SIZE: usize = 165; // SPL Token Account size\n");
+                content.push_str(
+                    "    const TOKEN_ACCOUNT_SIZE: usize = 165; // SPL Token Account size\n",
+                );
                 content.push_str("    let rent = pinocchio::sysvars::rent::Rent::get()?;\n");
-                content.push_str("    let rent_lamports = rent.minimum_balance(TOKEN_ACCOUNT_SIZE);\n\n");
+                content.push_str(
+                    "    let rent_lamports = rent.minimum_balance(TOKEN_ACCOUNT_SIZE);\n\n",
+                );
 
                 content.push_str("    // Transfer lamports from payer to new account\n");
                 content.push_str(&format!(
@@ -1066,10 +1096,7 @@ fn emit_instruction(
                 ));
 
                 content.push_str("    // Allocate space and assign owner\n");
-                content.push_str(&format!(
-                    "    {}.assign(&pinocchio_token::ID);\n",
-                    acc.name
-                ));
+                content.push_str(&format!("    {}.assign(&pinocchio_token::ID);\n", acc.name));
                 content.push_str(&format!(
                     "    {}.realloc(TOKEN_ACCOUNT_SIZE, false)?;\n\n",
                     acc.name

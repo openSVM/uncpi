@@ -92,9 +92,10 @@ fn main() -> Result<()> {
     };
 
     // Resolve output path - if input was a folder, derive output name from folder
-    let output_dir = if args.output == std::path::PathBuf::from("output") && args.input.is_dir() {
+    let output_dir = if args.output.as_os_str() == "output" && args.input.is_dir() {
         // Default output case - create a better default based on input folder name
-        let folder_name = args.input
+        let folder_name = args
+            .input
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("output");
