@@ -863,9 +863,17 @@ fn emit_instruction(
                     })
                     .collect();
 
-                // If bump is explicitly provided, add it to seeds
+                // If bump is explicitly provided, add it to seeds (with state field transformation)
                 if let Some(bump_var) = bump {
-                    seeds_code.push(format!("&[{}]", bump_var));
+                    let mut transformed_bump = bump_var.clone();
+                    // Transform state field references in bump
+                    for state_acc in &state_accounts_to_deserialize {
+                        let pattern = format!("{} . ", state_acc);
+                        if transformed_bump.contains(&pattern) {
+                            transformed_bump = transformed_bump.replace(&pattern, &format!("{}_state.", state_acc));
+                        }
+                    }
+                    seeds_code.push(format!("&[{}]", transformed_bump));
                 }
 
                 // Generate the PDA verification code
@@ -925,6 +933,27 @@ fn emit_instruction(
                     let pattern = format!("{} . ", state_acc);
                     transformed_code = transformed_code.replace(&pattern, &format!("{}_state.", state_acc));
                 }
+
+                // Transform token account field access: account.mint -> get_token_mint(account)?
+                for acc in &inst.accounts {
+                    // Check if this looks like a token account (commonly named with token types)
+                    let is_token_account = acc.name.contains("user_") ||
+                                          acc.name.contains("_token") ||
+                                          acc.name == "position" ||
+                                          acc.token_mint.is_some();
+
+                    if is_token_account {
+                        transformed_code = transformed_code.replace(
+                            &format!("{} . mint", acc.name),
+                            &format!("get_token_mint({})?", acc.name)
+                        );
+                        transformed_code = transformed_code.replace(
+                            &format!("{} . owner", acc.name),
+                            &format!("get_token_owner({})?", acc.name)
+                        );
+                    }
+                }
+
                 content.push_str(&format!("    {}\n", transformed_code));
             }
             _ => {}
