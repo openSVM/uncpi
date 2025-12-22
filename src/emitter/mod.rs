@@ -1006,7 +1006,7 @@ fn emit_instruction(
             }
 
             content.push_str(&format!(
-                "    pinocchio_token::instructions::InitializeAccount2 {{\n        account: {},\n        mint: {},\n        owner: {},\n        rent_sysvar: rent_sysvar,\n    }}.invoke(\n",
+                "    pinocchio_token::instructions::InitializeAccount2 {{\n        account: {},\n        mint: {},\n        owner: {}.key(),\n        rent_sysvar: rent_sysvar,\n    }}.invoke(\n",
                 acc.name, mint_name, authority_name
             ));
 

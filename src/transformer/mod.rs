@@ -421,7 +421,7 @@ fn transform_body(body: &str, accounts: &[PinocchioAccount], config: &Config) ->
     }
 
     // Fix Pubkey field assignments - need to dereference .key() (only if assignment exists)
-    if result.contains(".key()") && result.contains(" = ") {
+    if (result.contains(".key()") || result.contains(".key ()")) && result.contains(" = ") {
         result = fix_pubkey_assignments(&result);
     }
 
@@ -2017,37 +2017,23 @@ fn fix_pubkey_assignments(body: &str) -> String {
     ];
 
     // Pattern: field = account.key() -> field = *account.key()
+    // Use simple string replacement for common patterns
     for field in &pubkey_fields {
-        // For _state.field = acc.key()
-        let patterns = [
-            format!("_state.{} = ", field),
-            format!("period.{} = ", field),
-        ];
-
-        for prefix in &patterns {
-            if let Some(start) = result.find(prefix) {
-                let after = &result[start + prefix.len()..];
-
-                // Find the end of the assignment (;)
-                if let Some(semi) = after.find(';') {
-                    let value = &after[..semi].trim();
-
-                    // If it ends with .key() and doesn't start with *, dereference it
-                    if (value.ends_with(".key ()") || value.ends_with(".key()"))
-                        && !value.starts_with('*') {
-                            let new_value = format!("*{}", value);
-                            result = format!(
-                                "{}{}{}{}",
-                                &result[..start + prefix.len()],
-                                new_value,
-                                ";",
-                                &result[start + prefix.len() + semi + 1..]
-                            );
-                        }
-                }
-            }
-        }
+        // Pattern: _state.field = acc.key () ;
+        result = result.replace(
+            &format!("_state.{} = ", field),
+            &format!("_state.{} = *", field)
+        );
+        result = result.replace(
+            &format!("period.{} = ", field),
+            &format!("period.{} = *", field)
+        );
     }
+
+    // Clean up double asterisks that might have been created
+    result = result.replace(" = **", " = *");
+    result = result.replace(" = *Pubkey", " = Pubkey");  // Don't dereference Pubkey::default()
+    result = result.replace(" = *0", " = 0");  // Don't dereference numbers
 
     // Fix Some(reference) patterns for Optional pubkey fields
     // Pattern: Some (new_authority) -> Some (*new_authority)
