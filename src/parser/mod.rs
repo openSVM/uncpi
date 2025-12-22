@@ -453,6 +453,8 @@ fn parse_state_struct(s: &ItemStruct) -> Result<AnchorStateStruct> {
                 name: field_name,
                 ty: field_ty,
                 max_len,
+                is_vec: false,      // TODO: Implement Vec detection
+                vec_info: None,     // TODO: Implement Vec parsing
             });
         }
     }
@@ -461,6 +463,9 @@ fn parse_state_struct(s: &ItemStruct) -> Result<AnchorStateStruct> {
         name,
         fields,
         has_init_space,
+        is_zero_copy: false,  // TODO: Detect #[account(zero_copy)]
+        is_packed: false,     // TODO: Detect #[repr(C, packed)]
+        is_unsafe: false,     // TODO: Detect unsafe flag
     })
 }
 

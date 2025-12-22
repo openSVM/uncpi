@@ -3,12 +3,14 @@ use clap::Parser as ClapParser;
 use std::path::PathBuf;
 
 mod analyzer;
+mod collections;
 mod cpi_helpers;
 mod emitter;
 mod idl;
 mod ir;
 mod parser;
 mod transformer;
+mod zero_copy;
 
 #[derive(ClapParser, Debug)]
 #[command(name = "uncpi")]

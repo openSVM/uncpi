@@ -91,6 +91,14 @@ pub struct AnchorStateStruct {
     pub name: String,
     pub fields: Vec<StateField>,
     pub has_init_space: bool,
+
+    // Zero-copy support
+    #[serde(default)]
+    pub is_zero_copy: bool,
+    #[serde(default)]
+    pub is_packed: bool,
+    #[serde(default)]
+    pub is_unsafe: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,6 +106,31 @@ pub struct StateField {
     pub name: String,
     pub ty: String,
     pub max_len: Option<usize>, // For String fields with #[max_len(N)]
+
+    // NEW: Track if this is a Vec
+    #[serde(default)]
+    pub is_vec: bool,
+    #[serde(default)]
+    pub vec_info: Option<VecField>,
+}
+
+/// Represents a Vec field that needs transformation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VecField {
+    /// Field name
+    pub name: String,
+
+    /// Element type (e.g., "Pubkey", "u64")
+    pub element_type: String,
+
+    /// Maximum length from #[max_len(N)] attribute
+    pub max_len: Option<usize>,
+
+    /// Inferred or default maximum length
+    pub resolved_max_len: usize,
+
+    /// Whether this is mutable
+    pub is_mutable: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
