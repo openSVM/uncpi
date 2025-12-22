@@ -410,7 +410,12 @@ fn emit_lib_rs(program: &PinocchioProgram, src_dir: &Path, has_helpers: bool) ->
     content.push_str("#[cfg(not(feature = \"no-entrypoint\"))]\n");
     content.push_str("entrypoint!(process_instruction);\n\n");
 
-    // Note: Pinocchio provides its own panic handler, so we don't define one here
+    // Panic handler (required for no_std)
+    content.push_str("#[cfg(target_os = \"solana\")]\n");
+    content.push_str("#[panic_handler]\n");
+    content.push_str("fn panic(_info: &core::panic::PanicInfo) -> ! {\n");
+    content.push_str("    loop {}\n");
+    content.push_str("}\n\n");
 
     // Discriminator constants
     content.push_str("// Instruction discriminators (Anchor-compatible)\n");
@@ -1113,6 +1118,8 @@ fn emit_instruction(
         let mut fixed_body = fix_msg_macros(&inst.body);
         // Fix .key() assignments that need dereferencing
         fixed_body = fix_key_dereferencing(&fixed_body);
+        // Remove redundant self-assignments like "let escrow = & mut escrow ;"
+        fixed_body = remove_redundant_assignments(&fixed_body);
         for line in fixed_body.lines() {
             let trimmed = line.trim();
             if !trimmed.is_empty() {
@@ -1259,6 +1266,48 @@ fn fix_key_dereferencing(body: &str) -> String {
     
     // Clean up potential double dereferences
     result = result.replace(" = **", " = *");
+    
+    result
+}
+
+/// Remove redundant self-assignments like "let x = &mut x;"
+fn remove_redundant_assignments(body: &str) -> String {
+    let mut result = String::new();
+    
+    for line in body.lines() {
+        let trimmed = line.trim();
+        
+        // Pattern: let varname = &mut varname ; or let varname = *& mut varname ;
+        // These are self-assignments that should be removed
+        let mut skip_line = false;
+        
+        if trimmed.starts_with("let ") && trimmed.contains(" = ") {
+            // Extract variable name
+            if let Some(eq_pos) = trimmed.find(" = ") {
+                let before_eq = &trimmed[4..eq_pos].trim(); // After "let "
+                let after_eq = &trimmed[eq_pos + 3..].trim();
+                
+                // Check if it's a self-assignment
+                // Pattern: "let x = & mut x ;" or "let x = *& mut x ;"
+                let self_ref_pattern1 = format!("& mut {} ;", before_eq);
+                let self_ref_pattern2 = format!("*& mut {} ;", before_eq);
+                let self_ref_pattern3 = format!("&mut {} ;", before_eq);
+                let self_ref_pattern4 = format!("*&mut {} ;", before_eq);
+                
+                if after_eq.contains(&self_ref_pattern1) || 
+                   after_eq.contains(&self_ref_pattern2) ||
+                   after_eq.contains(&self_ref_pattern3) ||
+                   after_eq.contains(&self_ref_pattern4) {
+                    skip_line = true;
+                }
+            }
+        }
+        
+        if !skip_line {
+            result.push_str(line);
+            result.push('\n');
+        }
+    }
     
     result
 }
