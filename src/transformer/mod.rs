@@ -26,7 +26,6 @@ static MULTIPLE_SPACES_RE: Lazy<Regex> = Lazy::new(|| {
 });
 
 // ULTRA-OPTIMIZED: Single-pass bulk replacer
-use std::collections::HashMap;
 static BULK_REPLACEMENTS: Lazy<Vec<(&'static str, &'static str)>> = Lazy::new(|| {
     vec![
         // Spacing fixes
@@ -244,16 +243,23 @@ fn generate_validations(account_struct: &AnchorAccountStruct) -> Vec<Validation>
 fn transform_constraint_expr(expr: &str, accounts: &[AnchorAccount]) -> String {
     let mut result = expr.to_string();
 
-    // Replace account references
-    for (idx, acc) in accounts.iter().enumerate() {
-        // Replace acc.key() with accounts[idx].key()
-        result = result.replace(
-            &format!("{}.key()", acc.name),
-            &format!("accounts[{}].key()", idx),
-        );
+    // Sort accounts by name length (longest first) to avoid partial matches
+    let mut sorted_accounts: Vec<_> = accounts.iter().enumerate().collect();
+    sorted_accounts.sort_by(|a, b| b.1.name.len().cmp(&a.1.name.len()));
 
-        // Replace acc.field with dereferenced access
-        // This is simplified - real implementation needs type info
+    // Replace account references
+    for (_idx, acc) in sorted_accounts {
+        // Replace acc.key() with *accounts[idx].key() (dereference for comparison)
+        let key_pattern = format!("{}.key()", acc.name);
+        if result.contains(&key_pattern) {
+            result = result.replace(
+                &key_pattern,
+                &format!("*{}.key()", acc.name),
+            );
+        }
+
+        // Replace acc.field with acc_state.field for state access
+        // (This would need more sophisticated type checking in production)
     }
 
     result

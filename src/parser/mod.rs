@@ -501,9 +501,23 @@ fn extract_value(s: &str, key: &str) -> String {
         let rest = &s[idx + key.len()..];
         if let Some(eq_idx) = rest.find('=') {
             let value_start = rest[eq_idx + 1..].trim_start();
-            let end = value_start
-                .find([',', ')', '@'])
-                .unwrap_or(value_start.len());
+
+            // Find the end, considering balanced parentheses
+            let mut depth = 0;
+            let mut end = value_start.len();
+
+            for (i, ch) in value_start.char_indices() {
+                match ch {
+                    '(' => depth += 1,
+                    ')' if depth > 0 => depth -= 1,
+                    ')' | ',' | '@' if depth == 0 => {
+                        end = i;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+
             return value_start[..end].trim().to_string();
         }
     }
