@@ -429,8 +429,8 @@ fn transform_body(body: &str, accounts: &[PinocchioAccount], config: &Config) ->
         result = fix_pubkey_assignments(&result);
     }
 
-    // Fix token account .amount access - use get_token_balance() (only if exists)
-    if result.contains(".amount") {
+    // Fix token account field access - use get_token_balance/mint/owner() (only if exists)
+    if result.contains(".amount") || result.contains(".mint") || result.contains(".owner") {
         result = fix_token_amount_access(&result);
     }
 
@@ -810,9 +810,12 @@ fn replace_state_fields(body: &str, acc_name: &str) -> String {
     ];
 
     for field in &state_fields {
+        // Handle both spaced and non-spaced patterns
         let old_pattern = format!("{}.{}", acc_name, field);
+        let old_pattern_spaced = format!("{} . {}", acc_name, field);
         let new_pattern = format!("{}_state.{}", acc_name, field);
         result = result.replace(&old_pattern, &new_pattern);
+        result = result.replace(&old_pattern_spaced, &new_pattern);
     }
 
     // Also replace references like &pool in function calls with &pool_state
@@ -2001,21 +2004,28 @@ fn fix_token_amount_access(body: &str) -> String {
 
     for acc in &token_accounts {
         // Replace patterns like bags_vault.amount with get_token_balance(bags_vault)?
+        // Handle both spaced and non-spaced versions
         let amount_pattern = format!("{}.amount", acc);
+        let amount_pattern_spaced = format!("{} . amount", acc);
         let amount_replacement = format!("get_token_balance({})?", acc);
         result = result.replace(&amount_pattern, &amount_replacement);
+        result = result.replace(&amount_pattern_spaced, &amount_replacement);
 
         // Replace patterns like user_token.mint with get_token_mint(user_token)?
         let mint_pattern = format!("{}.mint", acc);
+        let mint_pattern_spaced = format!("{} . mint", acc);
         let mint_replacement = format!("get_token_mint({})?", acc);
         result = result.replace(&mint_pattern, &mint_replacement);
+        result = result.replace(&mint_pattern_spaced, &mint_replacement);
 
         // Replace patterns like user_token.owner with get_token_owner(user_token)?
         let owner_pattern = format!("{}.owner", acc);
+        let owner_pattern_spaced = format!("{} . owner", acc);
         // But only if it's accessing token account owner, not user.owner which is different
         if acc != &"user" {
             let owner_replacement = format!("get_token_owner({})?", acc);
             result = result.replace(&owner_pattern, &owner_replacement);
+            result = result.replace(&owner_pattern_spaced, &owner_replacement);
         }
     }
 
