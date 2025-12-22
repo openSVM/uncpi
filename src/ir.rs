@@ -178,6 +178,10 @@ pub struct PinocchioAccount {
     pub is_writable: bool,
     pub is_pda: bool,
     pub pda_seeds: Option<Vec<String>>,
+    pub is_init: bool,
+    pub token_mint: Option<String>,      // For init token accounts
+    pub token_authority: Option<String>, // For init token accounts
+    pub init_payer: Option<String>,      // Who pays for initialization
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

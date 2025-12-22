@@ -361,16 +361,18 @@ fn parse_account_constraints(attrs: &[Attribute]) -> Vec<AccountConstraint> {
 
         let tokens = attr_to_string(attr);
 
+
         if tokens.contains("mut") {
             constraints.push(AccountConstraint::Mut);
         }
 
-        if tokens.contains("init,") || tokens.contains("init_if_needed") {
+        if tokens.contains("init") {
             let payer = extract_value(&tokens, "payer");
             let space = extract_value(&tokens, "space");
             if tokens.contains("init_if_needed") {
                 constraints.push(AccountConstraint::InitIfNeeded { payer, space });
             } else {
+                // Only add Init if it's not init_if_needed
                 constraints.push(AccountConstraint::Init { payer, space });
             }
         }
@@ -385,14 +387,20 @@ fn parse_account_constraints(attrs: &[Attribute]) -> Vec<AccountConstraint> {
             constraints.push(AccountConstraint::Bump(bump));
         }
 
-        if tokens.contains("token::mint") {
-            let mint = extract_value(&tokens, "token::mint");
-            constraints.push(AccountConstraint::TokenMint(mint));
+        // Handle "token :: mint" (with spaces from tokenization)
+        if tokens.contains("token :: mint") {
+            let mint = extract_value(&tokens, "token :: mint");
+            if !mint.is_empty() {
+                constraints.push(AccountConstraint::TokenMint(mint));
+            }
         }
 
-        if tokens.contains("token::authority") {
-            let auth = extract_value(&tokens, "token::authority");
-            constraints.push(AccountConstraint::TokenAuthority(auth));
+        // Handle "token :: authority" (with spaces from tokenization)
+        if tokens.contains("token :: authority") {
+            let auth = extract_value(&tokens, "token :: authority");
+            if !auth.is_empty() {
+                constraints.push(AccountConstraint::TokenAuthority(auth));
+            }
         }
 
         if tokens.contains("constraint") {

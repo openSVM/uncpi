@@ -174,6 +174,34 @@ fn transform_account(
         .iter()
         .find(|p| p.account_name == anchor_acc.name);
 
+    // Check for init constraint
+    let mut is_init = false;
+    let mut init_payer = None;
+    for constraint in &anchor_acc.constraints {
+        if let AccountConstraint::Init { payer, .. } = constraint {
+            is_init = true;
+            init_payer = Some(payer.clone());
+            break;
+        }
+    }
+
+    // Check for token account constraints
+    let token_mint = anchor_acc.constraints.iter().find_map(|c| {
+        if let AccountConstraint::TokenMint(mint) = c {
+            Some(mint.clone())
+        } else {
+            None
+        }
+    });
+
+    let token_authority = anchor_acc.constraints.iter().find_map(|c| {
+        if let AccountConstraint::TokenAuthority(auth) = c {
+            Some(auth.clone())
+        } else {
+            None
+        }
+    });
+
     PinocchioAccount {
         name: anchor_acc.name.clone(),
         index,
@@ -181,6 +209,10 @@ fn transform_account(
         is_writable,
         is_pda: pda_info.is_some(),
         pda_seeds: pda_info.map(|p| p.seeds.clone()),
+        is_init,
+        token_mint,
+        token_authority,
+        init_payer,
     }
 }
 

@@ -629,12 +629,24 @@ fn emit_instruction(
     content.push_str("};\n");
 
     // Add pinocchio_token if the instruction uses token operations
-    if inst.body.contains("token::")
+    let needs_token_imports = inst.body.contains("token::")
         || inst.body.contains("Transfer")
         || inst.body.contains("mint_to")
         || inst.body.contains("burn")
-    {
-        content.push_str("use pinocchio_token::instructions::{Transfer, MintTo, Burn};\n");
+        || inst.accounts.iter().any(|acc| acc.is_init && acc.token_mint.is_some());
+
+    if needs_token_imports {
+        let mut imports = vec!["Transfer", "MintTo", "Burn"];
+
+        // Add InitializeAccount2 if we're initializing token accounts
+        if inst.accounts.iter().any(|acc| acc.is_init && acc.token_mint.is_some()) {
+            imports.push("InitializeAccount2");
+        }
+
+        content.push_str(&format!(
+            "use pinocchio_token::instructions::{{{}}};\n",
+            imports.join(", ")
+        ));
     }
     content.push('\n');
 
@@ -649,6 +661,17 @@ fn emit_instruction(
     }
     content.push('\n');
 
+    // Check if we need Rent sysvar for token account initialization
+    let needs_rent_sysvar = inst.accounts.iter().any(|acc| {
+        acc.is_init && acc.token_mint.is_some()
+    });
+
+    let rent_sysvar_index = if needs_rent_sysvar {
+        inst.accounts.len()
+    } else {
+        0
+    };
+
     // Account indices as constants for clarity
     if !inst.accounts.is_empty() {
         content.push_str("// Account indices\n");
@@ -658,6 +681,9 @@ fn emit_instruction(
                 to_screaming_snake(&acc.name),
                 acc.index
             ));
+        }
+        if needs_rent_sysvar {
+            content.push_str(&format!("const RENT_SYSVAR: usize = {};\n", rent_sysvar_index));
         }
         content.push('\n');
     }
@@ -677,9 +703,15 @@ fn emit_instruction(
     }
 
     // Account validation
+    let min_accounts = if needs_rent_sysvar {
+        inst.accounts.len() + 1
+    } else {
+        inst.accounts.len()
+    };
+
     content.push_str(&format!(
         "    // Validate account count\n    if accounts.len() < {} {{\n        return Err(ProgramError::NotEnoughAccountKeys);\n    }}\n\n",
-        inst.accounts.len()
+        min_accounts
     ));
 
     // Get account references with better naming
@@ -690,6 +722,9 @@ fn emit_instruction(
             acc.name,
             to_screaming_snake(&acc.name)
         ));
+    }
+    if needs_rent_sysvar {
+        content.push_str("    let rent_sysvar = &accounts[RENT_SYSVAR];\n");
     }
     content.push('\n');
 
@@ -847,6 +882,36 @@ fn emit_instruction(
             offset += size;
         }
         content.push('\n');
+    }
+
+    // Generate token account initialization code if needed
+    for acc in &inst.accounts {
+        if acc.is_init && acc.token_mint.is_some() && acc.token_authority.is_some() {
+            content.push_str(&format!("    // Initialize token account: {}\n", acc.name));
+            let mint_name = acc.token_mint.as_ref().unwrap();
+            let authority_name = acc.token_authority.as_ref().unwrap();
+
+            content.push_str(&format!(
+                "    pinocchio_token::instructions::InitializeAccount2 {{\n        account: {},\n        mint: {},\n        authority: {}.key(),\n    }}.invoke_signed(\n",
+                acc.name, mint_name, authority_name
+            ));
+
+            // Add PDA seeds if this is a PDA account
+            if acc.is_pda && acc.pda_seeds.is_some() {
+                content.push_str("        &[&accounts],\n");
+                let seeds = acc.pda_seeds.as_ref().unwrap();
+                let seeds_code: Vec<String> = seeds
+                    .iter()
+                    .map(|s| format!("&[{}]", s))
+                    .collect();
+                content.push_str(&format!("        &[{}],\n", seeds_code.join(", ")));
+            } else {
+                content.push_str("        &[&accounts],\n");
+                content.push_str("        &[],\n");
+            }
+
+            content.push_str("    )?;\n\n");
+        }
     }
 
     // Add transformed body or placeholder
