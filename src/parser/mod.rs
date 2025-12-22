@@ -446,9 +446,13 @@ fn parse_state_struct(s: &ItemStruct) -> Result<AnchorStateStruct> {
                 .unwrap_or_default();
             let field_ty = type_to_string(&field.ty);
 
+            // Extract #[max_len(N)] if present
+            let max_len = extract_max_len(&field.attrs);
+
             fields.push(StateField {
                 name: field_name,
                 ty: field_ty,
+                max_len,
             });
         }
     }
@@ -603,4 +607,22 @@ fn extract_msg_attr(attrs: &[Attribute]) -> String {
         }
     }
     String::new()
+}
+
+fn extract_max_len(attrs: &[Attribute]) -> Option<usize> {
+    for attr in attrs {
+        if attr.path().is_ident("max_len") {
+            let tokens = attr_to_string(attr);
+            // Parse "# [max_len (200)]" -> extract 200
+            if let Some(start) = tokens.find('(') {
+                if let Some(end) = tokens.find(')') {
+                    let num_str = tokens[start + 1..end].trim();
+                    if let Ok(num) = num_str.parse::<usize>() {
+                        return Some(num);
+                    }
+                }
+            }
+        }
+    }
+    None
 }

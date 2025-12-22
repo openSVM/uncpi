@@ -526,7 +526,13 @@ fn emit_state_rs(program: &PinocchioProgram, src_dir: &Path) -> Result<()> {
         content.push_str(&format!("pub struct {} {{\n", state.name));
 
         for field in &state.fields {
-            content.push_str(&format!("    pub {}: {},\n", field.name, field.ty));
+            // Transform String to [u8; N] if max_len is specified
+            let field_type = if field.ty == "String" && field.max_len.is_some() {
+                format!("[u8; {}]", field.max_len.unwrap())
+            } else {
+                field.ty.clone()
+            };
+            content.push_str(&format!("    pub {}: {},\n", field.name, field_type));
         }
 
         content.push_str("}\n\n");
@@ -885,9 +891,10 @@ fn emit_instruction(
                         let mut seed = s.clone();
 
                         // Transform state field references: "pool . bump" -> "pool_state.bump"
+                        // BUT: Don't transform "pool . key ()" since .key() is an AccountInfo method
                         for (state_acc, _) in &state_accounts_to_deserialize {
                             let pattern = format!("{} . ", state_acc);
-                            if seed.contains(&pattern) {
+                            if seed.contains(&pattern) && !seed.contains(&format!("{} . key", state_acc)) {
                                 seed = seed.replace(&pattern, &format!("{}_state.", state_acc));
                             }
                         }

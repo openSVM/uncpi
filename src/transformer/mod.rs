@@ -149,11 +149,28 @@ fn transform_instruction(
     // Transform body (replace Anchor patterns with Pinocchio)
     let body = transform_body(&anchor_inst.body, &accounts, &program.state_structs, config);
 
+    // Transform args: String → [u8; N] based on state field max_len
+    let transformed_args = anchor_inst.args.iter().map(|arg| {
+        let mut new_arg = arg.clone();
+        // If arg is String type, look for matching state field with max_len
+        if arg.ty == "String" {
+            for state in &program.state_structs {
+                if let Some(field) = state.fields.iter().find(|f| f.name == arg.name) {
+                    if let Some(max_len) = field.max_len {
+                        new_arg.ty = format!("[u8; {}]", max_len);
+                        break;
+                    }
+                }
+            }
+        }
+        new_arg
+    }).collect();
+
     Ok(PinocchioInstruction {
         name: anchor_inst.name.clone(),
         discriminator,
         accounts,
-        args: anchor_inst.args.clone(),
+        args: transformed_args,
         validations,
         body,
     })
@@ -2341,12 +2358,23 @@ fn transform_state(
         .fields
         .iter()
         .map(|f| {
-            let size = estimate_field_size(&f.ty);
+            // Transform String to [u8; N] if max_len is specified
+            let field_ty = if f.ty == "String" && f.max_len.is_some() {
+                format!("[u8; {}]", f.max_len.unwrap())
+            } else {
+                f.ty.clone()
+            };
+            let size = if f.max_len.is_some() {
+                f.max_len.unwrap()
+            } else {
+                estimate_field_size(&field_ty)
+            };
             let field = PinocchioField {
                 name: f.name.clone(),
-                ty: rust_type_to_pinocchio(&f.ty),
+                ty: rust_type_to_pinocchio(&field_ty),
                 size,
                 offset,
+                max_len: f.max_len,
             };
             offset += size;
             field

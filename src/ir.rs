@@ -97,6 +97,7 @@ pub struct AnchorStateStruct {
 pub struct StateField {
     pub name: String,
     pub ty: String,
+    pub max_len: Option<usize>, // For String fields with #[max_len(N)]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -224,6 +225,7 @@ pub struct PinocchioField {
     pub ty: String,
     pub size: usize,
     pub offset: usize,
+    pub max_len: Option<usize>, // For String fields with #[max_len(N)]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
