@@ -1412,47 +1412,58 @@ fn extract_transfer_amount_with_context(rest: &str, _from_name: &str, _to_name: 
 /// Extract the amount from a token::transfer call
 /// The amount is the last argument before the closing )?
 fn extract_transfer_amount(rest: &str) -> String {
-    // Pattern: }, signer_seeds,), amount_in,)?
-    // or: },), amount_in,)?
-    // We need to find the last argument before )?
+    // Pattern examples:
+    // },), amount)?;
+    // }, signer), amount)?;
+    // ),\n            escrow.taker_amount,\n        )?;
 
-    // Find the last comma-separated value before )?
     let trimmed = rest.trim();
 
-    // Look for pattern: ), amount)? or ), amount) ?
-    // The amount is between the last ), and )?
-    let last_paren = trimmed.rfind(") ?").or_else(|| trimmed.rfind(")?"));
+    // Strategy: Find ")?" and work backwards to find the amount
+    // The amount is everything between the last "," and the ")?"
 
-    if let Some(paren_pos) = last_paren {
-        let before_end = &trimmed[..paren_pos];
-        // Find the previous comma
-        if let Some(comma_pos) = before_end.rfind(',') {
-            let amount = before_end[comma_pos + 1..]
-                .trim()
-                .trim_end_matches(')')
-                .trim();
-            if !amount.is_empty() && !amount.contains("signer") {
-                // Don't apply clean_spaces_simple if it's a field access (contains '.')
-                // This preserves expressions like "escrow.taker_amount"
-                if amount.contains('.') {
-                    return amount.to_string();
-                }
-                return clean_spaces_simple(amount);
+    // First, find where ")?" or ") ?" appears
+    let end_pattern = if let Some(pos) = trimmed.find(")?") {
+        pos
+    } else if let Some(pos) = trimmed.find(") ?") {
+        pos
+    } else {
+        // No )? found, can't parse
+        return "amount".to_string();
+    };
+
+    // Now we have everything before ")?"
+    let before_question = &trimmed[..end_pattern];
+
+    // The pattern is: ...), amount, )
+    // or: ...),amount)
+    // We need to find the amount between two sections with commas
+
+    // Remove any trailing )
+    let cleaned = before_question.trim_end_matches(')').trim();
+
+    // Now find the LAST comma - the amount is BEFORE this comma
+    if let Some(last_comma) = cleaned.rfind(',') {
+        let amount_section = &cleaned[..last_comma];
+
+        // Now find the PREVIOUS comma - the amount is AFTER this comma
+        if let Some(prev_comma) = amount_section.rfind(',') {
+            let amount = amount_section[prev_comma + 1..].trim();
+
+            // Validate: should not be empty, should not contain "signer" or "seeds"
+            if !amount.is_empty() && !amount.contains("signer") && !amount.contains("seeds") {
+                return amount.to_string();
             }
-        }
-    }
-
-    // Fallback: Try to find any amount-like expression in the remainder
-    // Look for pattern: ), <expression>)? where expression could be field access
-    // This handles cases where the extraction above failed due to formatting
-
-    // Try to find everything between the last ), and )?
-    if let Some(last_close_paren) = trimmed.rfind("),") {
-        let after_close = &trimmed[last_close_paren + 2..];
-        if let Some(question_pos) = after_close.find(")?") {
-            let potential_amount = after_close[..question_pos].trim();
-            if !potential_amount.is_empty() && !potential_amount.contains("signer") {
-                return potential_amount.to_string();
+        } else {
+            // Only one comma found, so amount might be after it (no signer case)
+            // Pattern: },), amount
+            let potential_amount = amount_section.trim();
+            if potential_amount.ends_with("),") || potential_amount.ends_with(") ,") {
+                // This is the CpiContext end, amount is after our comma
+                let after_comma = &cleaned[last_comma + 1..].trim();
+                if !after_comma.is_empty() && !after_comma.contains("signer") {
+                    return after_comma.to_string();
+                }
             }
         }
     }
