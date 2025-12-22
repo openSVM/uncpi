@@ -30,7 +30,7 @@ pub fn emit_with_extras(
 
     // Emit src/helpers.rs (if we have extras)
     if let Some(extras) = extras {
-        emit_helpers_rs(extras, &src_dir)?;
+        emit_helpers_rs(extras, program, &src_dir)?;
     }
 
     // Emit src/instructions/
@@ -63,7 +63,7 @@ fn emit_security_json(program: &PinocchioProgram, output_dir: &Path) -> Result<(
     Ok(())
 }
 
-fn emit_helpers_rs(extras: &SourceExtras, src_dir: &Path) -> Result<()> {
+fn emit_helpers_rs(extras: &SourceExtras, program: &PinocchioProgram, src_dir: &Path) -> Result<()> {
     let mut content = String::new();
 
     content.push_str("//! Constants and helper functions extracted from original source\n\n");
@@ -81,7 +81,10 @@ fn emit_helpers_rs(extras: &SourceExtras, src_dir: &Path) -> Result<()> {
     if !extras.helper_functions.is_empty() {
         content.push_str("// Helper functions\n");
         content.push_str("use crate::state::*;\n");
-        content.push_str("use crate::error::Error;\n");
+        // Only import Error if the program has custom errors
+        if !program.errors.is_empty() {
+            content.push_str("use crate::error::Error;\n");
+        }
         content.push_str("use pinocchio::program_error::ProgramError;\n");
         content.push_str("use pinocchio::sysvars::{clock::Clock, Sysvar};\n");
         content.push_str("use pinocchio::account_info::AccountInfo;\n\n");
@@ -567,23 +570,29 @@ fn emit_error_rs(program: &PinocchioProgram, src_dir: &Path) -> Result<()> {
 
     content.push_str("use pinocchio::program_error::ProgramError;\n\n");
 
-    content.push_str("#[repr(u32)]\n");
-    content.push_str("#[derive(Clone, Copy, Debug)]\n");
-    content.push_str("pub enum Error {\n");
+    // Only generate error enum if there are errors defined
+    if program.errors.is_empty() {
+        // Generate a placeholder comment if no errors
+        content.push_str("// No custom errors defined in this program\n");
+    } else {
+        content.push_str("#[repr(u32)]\n");
+        content.push_str("#[derive(Clone, Copy, Debug)]\n");
+        content.push_str("pub enum Error {\n");
 
-    for error in &program.errors {
-        content.push_str(&format!("    /// {}\n", error.msg));
-        content.push_str(&format!("    {} = {},\n", error.name, error.code));
+        for error in &program.errors {
+            content.push_str(&format!("    /// {}\n", error.msg));
+            content.push_str(&format!("    {} = {},\n", error.name, error.code));
+        }
+
+        content.push_str("}\n\n");
+
+        // Impl From<Error> for ProgramError
+        content.push_str("impl From<Error> for ProgramError {\n");
+        content.push_str("    fn from(e: Error) -> Self {\n");
+        content.push_str("        ProgramError::Custom(e as u32)\n");
+        content.push_str("    }\n");
+        content.push_str("}\n");
     }
-
-    content.push_str("}\n\n");
-
-    // Impl From<Error> for ProgramError
-    content.push_str("impl From<Error> for ProgramError {\n");
-    content.push_str("    fn from(e: Error) -> Self {\n");
-    content.push_str("        ProgramError::Custom(e as u32)\n");
-    content.push_str("    }\n");
-    content.push_str("}\n");
 
     fs::write(src_dir.join("error.rs"), content)?;
     Ok(())
@@ -659,7 +668,10 @@ fn emit_instruction(
     }
     content.push('\n');
 
-    content.push_str("use crate::error::Error;\n");
+    // Only import Error if the program has custom errors
+    if !program.errors.is_empty() {
+        content.push_str("use crate::error::Error;\n");
+    }
     content.push_str("use crate::helpers::*;\n");
 
     // Import state structs if referenced in body or validations
@@ -1120,6 +1132,8 @@ fn emit_instruction(
         fixed_body = fix_key_dereferencing(&fixed_body);
         // Remove redundant self-assignments like "let escrow = & mut escrow ;"
         fixed_body = remove_redundant_assignments(&fixed_body);
+        // Replace custom error enum names with Error::
+        fixed_body = fix_error_enum_names(&fixed_body, program);
         for line in fixed_body.lines() {
             let trimmed = line.trim();
             if !trimmed.is_empty() {
@@ -1306,6 +1320,38 @@ fn remove_redundant_assignments(body: &str) -> String {
         if !skip_line {
             result.push_str(line);
             result.push('\n');
+        }
+    }
+    
+    result
+}
+
+/// Replace custom error enum names (like VotingError, StakingError) with Error
+fn fix_error_enum_names(body: &str, program: &PinocchioProgram) -> String {
+    let mut result = body.to_string();
+    
+    // If there are no errors, nothing to fix
+    if program.errors.is_empty() {
+        return result;
+    }
+    
+    // Common error enum name patterns that need to be replaced
+    // These are from the original Anchor code and need to become "Error::"
+    let error_patterns = [
+        "VotingError::",
+        "StakingError::",
+        "EscrowError::",
+        "VaultError::",
+        "PoolError::",
+        "SwapError::",
+        "FarmingError::",
+        "LendingError::",
+        "GovernanceError::",
+    ];
+    
+    for pattern in &error_patterns {
+        if result.contains(pattern) {
+            result = result.replace(pattern, "Error::");
         }
     }
     
