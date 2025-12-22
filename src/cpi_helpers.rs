@@ -118,8 +118,8 @@ pub fn token_burn_cpi(
 pub fn sol_transfer_cpi(from_account: &str, to_account: &str, amount: &str) -> String {
     format!(
         r#"// SOL transfer
-    **{}.try_borrow_mut_lamports()? -= {};
-    **{}.try_borrow_mut_lamports()? += {};"#,
+    *{}.try_borrow_mut_lamports()? -= {};
+    *{}.try_borrow_mut_lamports()? += {};"#,
         from_account, amount, to_account, amount
     )
 }

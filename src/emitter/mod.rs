@@ -1087,11 +1087,11 @@ fn emit_instruction(
 
                 content.push_str("    // Transfer lamports from payer to new account\n");
                 content.push_str(&format!(
-                    "    **{}.try_borrow_mut_lamports()? -= rent_lamports;\n",
+                    "    *{}.try_borrow_mut_lamports()? -= rent_lamports;\n",
                     payer_name
                 ));
                 content.push_str(&format!(
-                    "    **{}.try_borrow_mut_lamports()? += rent_lamports;\n\n",
+                    "    *{}.try_borrow_mut_lamports()? += rent_lamports;\n\n",
                     acc.name
                 ));
 

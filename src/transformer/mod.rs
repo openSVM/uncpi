@@ -1860,6 +1860,18 @@ fn fix_pubkey_comparisons(body: &str) -> String {
     result = result.replace(" == *false", " == false");
     result = result.replace(" == *true", " == true");
 
+    // Clean up state field comparisons (state_name.field shouldn't be dereferenced)
+    // Pattern: == *pool_state.field or == *farming_period_state.field
+    result = result.replace(" == *pool_state.", " == pool_state.");
+    result = result.replace(" != *pool_state.", " != pool_state.");
+    result = result.replace(" = *pool_state.", " = pool_state.");
+    result = result.replace(" == *farming_period_state.", " == farming_period_state.");
+    result = result.replace(" != *farming_period_state.", " != farming_period_state.");
+    result = result.replace(" = *farming_period_state.", " = farming_period_state.");
+    result = result.replace(" == *user_position_state.", " == user_position_state.");
+    result = result.replace(" != *user_position_state.", " != user_position_state.");
+    result = result.replace(" = *user_position_state.", " = user_position_state.");
+
     result
 }
 
@@ -2046,6 +2058,8 @@ fn fix_pubkey_assignments(body: &str) -> String {
     // Clean up double asterisks that might have been created
     result = result.replace(" = **", " = *");
     result = result.replace(" = *Pubkey", " = Pubkey"); // Don't dereference Pubkey::default()
+    result = result.replace(" = *None", " = None"); // Don't dereference None
+    result = result.replace(" = *Some", " = Some"); // Don't dereference Some
     result = result.replace(" = *0", " = 0"); // Don't dereference numbers
 
     // Fix Some(reference) patterns for Optional pubkey fields
