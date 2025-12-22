@@ -1096,7 +1096,7 @@ fn emit_instruction(
                 ));
 
                 content.push_str("    // Allocate space and assign owner\n");
-                content.push_str(&format!("    {}.assign(&pinocchio_token::ID);\n", acc.name));
+                content.push_str(&format!("    unsafe {{ {}.assign(&pinocchio_token::ID); }}\n", acc.name));
                 content.push_str(&format!(
                     "    {}.realloc(TOKEN_ACCOUNT_SIZE, false)?;\n\n",
                     acc.name
