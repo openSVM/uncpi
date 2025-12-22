@@ -22,10 +22,10 @@ static CLEANUP_NEWLINES_RE: Lazy<Regex> = Lazy::new(|| {
 
 // Regex for cleaning multiple spaces efficiently
 static MULTIPLE_SPACES_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\s{2,}").unwrap()
+    Regex::new(r"[ \t]{2,}").unwrap()
 });
 
-// ULTRA-OPTIMIZED: Single-pass bulk replacer
+/// ULTRA-OPTIMIZED: Single-pass bulk replacer
 static BULK_REPLACEMENTS: Lazy<Vec<(&'static str, &'static str)>> = Lazy::new(|| {
     vec![
         // Spacing fixes
@@ -1211,11 +1211,13 @@ fn find_transfer_end(s: &str) -> Option<usize> {
             ')' => {
                 depth -= 1;
                 if in_call && depth == 0 {
-                    // Check for ? or ;
+                    // Find the end of the statement - look for semicolon
                     let rest = &s[i..];
-                    if rest.starts_with(") ?") || rest.starts_with(");") {
-                        return Some(i + 3);
+                    // Find semicolon, skipping whitespace and ?
+                    if let Some(semi_pos) = rest.find(';') {
+                        return Some(i + semi_pos + 1);
                     }
+                    // Fallback: just after the closing paren
                     return Some(i + 1);
                 }
             }

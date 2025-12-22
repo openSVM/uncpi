@@ -821,8 +821,18 @@ fn emit_instruction(
                 // Generate the PDA verification code
                 content.push_str(&format!("    // Verify PDA for {}\n", acc.name));
 
-                if bump.is_some() {
-                    // If bump is provided, just derive PDA with it
+                // If account is being initialized, always use find_program_address to get bump
+                if acc.is_init || bump.is_none() {
+                    // Find the bump (needed for init or when bump not provided)
+                    content.push_str(&format!(
+                        "    let (expected_{}, _bump_{}) = pinocchio::pubkey::find_program_address(\n",
+                        acc.name, acc.name
+                    ));
+                    content.push_str(&format!("        &[{}],\n", seeds_code.join(", ")));
+                    content.push_str("        program_id,\n");
+                    content.push_str("    );\n");
+                } else {
+                    // If bump is provided from another field, use create_program_address
                     content.push_str(&format!(
                         "    let expected_{} = pinocchio::pubkey::create_program_address(\n",
                         acc.name
@@ -830,15 +840,6 @@ fn emit_instruction(
                     content.push_str(&format!("        &[{}],\n", seeds_code.join(", ")));
                     content.push_str("        program_id,\n");
                     content.push_str("    )?;\n");
-                } else {
-                    // If bump is not provided, find it
-                    content.push_str(&format!(
-                        "    let (expected_{}, _bump) = pinocchio::pubkey::find_program_address(\n",
-                        acc.name
-                    ));
-                    content.push_str(&format!("        &[{}],\n", seeds_code.join(", ")));
-                    content.push_str("        program_id,\n");
-                    content.push_str("    );\n");
                 }
                 content.push_str(&format!(
                     "    if {}.key() != &expected_{} {{\n",
@@ -890,6 +891,8 @@ fn emit_instruction(
             content.push_str(&format!("    // Initialize token account: {}\n", acc.name));
             let mint_name = acc.token_mint.as_ref().unwrap();
             let authority_name = acc.token_authority.as_ref().unwrap();
+            let default_payer = "authority".to_string();
+            let payer_name = acc.init_payer.as_ref().unwrap_or(&default_payer);
 
             // Verify rent sysvar address
             content.push_str("    // Verify Rent sysvar\n");
@@ -902,24 +905,44 @@ fn emit_instruction(
             content.push_str("        return Err(ProgramError::InvalidArgument);\n");
             content.push_str("    }\n\n");
 
+            // Add create_account CPI if this is a PDA (needs to be created)
+            if acc.is_pda && acc.pda_seeds.is_some() {
+                content.push_str("    // Create PDA account for token account\n");
+                content.push_str("    const TOKEN_ACCOUNT_SIZE: usize = 165; // SPL Token Account size\n");
+                content.push_str("    let rent = pinocchio::sysvars::rent::Rent::get()?;\n");
+                content.push_str("    let rent_lamports = rent.minimum_balance(TOKEN_ACCOUNT_SIZE);\n\n");
+
+                content.push_str("    // Transfer lamports from payer to new account\n");
+                content.push_str(&format!(
+                    "    **{}.try_borrow_mut_lamports()? -= rent_lamports;\n",
+                    payer_name
+                ));
+                content.push_str(&format!(
+                    "    **{}.try_borrow_mut_lamports()? += rent_lamports;\n\n",
+                    acc.name
+                ));
+
+                content.push_str("    // Allocate space and assign owner\n");
+                content.push_str(&format!(
+                    "    {}.assign(&pinocchio_token::ID);\n",
+                    acc.name
+                ));
+                content.push_str(&format!(
+                    "    {}.realloc(TOKEN_ACCOUNT_SIZE, false)?;\n\n",
+                    acc.name
+                ));
+            }
+
             content.push_str(&format!(
-                "    pinocchio_token::instructions::InitializeAccount2 {{\n        account: {},\n        mint: {},\n        authority: {}.key(),\n        rent: rent_sysvar,\n    }}.invoke_signed(\n",
+                "    pinocchio_token::instructions::InitializeAccount2 {{\n        account: {},\n        mint: {},\n        owner: {},\n        rent_sysvar: rent_sysvar,\n    }}.invoke(\n",
                 acc.name, mint_name, authority_name
             ));
 
-            // Add PDA seeds if this is a PDA account
-            if acc.is_pda && acc.pda_seeds.is_some() {
-                content.push_str("        &[&accounts],\n");
-                let seeds = acc.pda_seeds.as_ref().unwrap();
-                let seeds_code: Vec<String> = seeds
-                    .iter()
-                    .map(|s| format!("&[{}]", s))
-                    .collect();
-                content.push_str(&format!("        &[{}],\n", seeds_code.join(", ")));
-            } else {
-                content.push_str("        &[&accounts],\n");
-                content.push_str("        &[],\n");
-            }
+            // Pass the specific accounts needed for InitializeAccount2
+            content.push_str(&format!(
+                "        &[{}.clone(), {}.clone(), {}.clone(), rent_sysvar.clone()],\n",
+                acc.name, mint_name, authority_name
+            ));
 
             content.push_str("    )?;\n\n");
         }

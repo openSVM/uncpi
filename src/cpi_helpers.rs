@@ -25,7 +25,8 @@ pub fn token_transfer_cpi(
 {}
         ]],
     )?;
-    // Transfer amount: {}"#,
+    // Transfer amount: {}
+"#,
             from_account,
             to_account,
             authority,
@@ -43,7 +44,8 @@ pub fn token_transfer_cpi(
         to: {}.key(),
         authority: {}.key(),
     }}.invoke(&[{}.clone(), {}.clone(), {}.clone()])?;
-    // Transfer amount: {}"#,
+    // Transfer amount: {}
+"#,
             from_account, to_account, authority, from_account, to_account, authority, amount
         )
     }
@@ -72,7 +74,8 @@ pub fn token_mint_to_cpi(
 {}
         ]],
     )?;
-    // Mint amount: {}"#,
+    // Mint amount: {}
+"#,
             mint_account,
             to_account,
             authority,
@@ -90,7 +93,8 @@ pub fn token_mint_to_cpi(
         account: {}.key(),
         mint_authority: {}.key(),
     }}.invoke(&[{}.clone(), {}.clone(), {}.clone()])?;
-    // Mint amount: {}"#,
+    // Mint amount: {}
+"#,
             mint_account, to_account, authority, mint_account, to_account, authority, amount
         )
     }
@@ -110,7 +114,8 @@ pub fn token_burn_cpi(
         mint: {}.key(),
         authority: {}.key(),
     }}.invoke(&[{}.clone(), {}.clone(), {}.clone()])?;
-    // Burn amount: {}"#,
+    // Burn amount: {}
+"#,
         from_account, mint_account, authority, from_account, mint_account, authority, amount
     )
 }
