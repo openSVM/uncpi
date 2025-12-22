@@ -1419,10 +1419,12 @@ fn extract_transfer_amount(rest: &str) -> String {
     // Find the last comma-separated value before )?
     let trimmed = rest.trim();
 
-    // Look for pattern: ), amount)?
+    // Look for pattern: ), amount)? or ), amount) ?
     // The amount is between the last ), and )?
-    if let Some(last_paren) = trimmed.rfind(") ?") {
-        let before_end = &trimmed[..last_paren];
+    let last_paren = trimmed.rfind(") ?").or_else(|| trimmed.rfind(")?"));
+
+    if let Some(paren_pos) = last_paren {
+        let before_end = &trimmed[..paren_pos];
         // Find the previous comma
         if let Some(comma_pos) = before_end.rfind(',') {
             let amount = before_end[comma_pos + 1..]
@@ -1430,7 +1432,27 @@ fn extract_transfer_amount(rest: &str) -> String {
                 .trim_end_matches(')')
                 .trim();
             if !amount.is_empty() && !amount.contains("signer") {
+                // Don't apply clean_spaces_simple if it's a field access (contains '.')
+                // This preserves expressions like "escrow.taker_amount"
+                if amount.contains('.') {
+                    return amount.to_string();
+                }
                 return clean_spaces_simple(amount);
+            }
+        }
+    }
+
+    // Fallback: Try to find any amount-like expression in the remainder
+    // Look for pattern: ), <expression>)? where expression could be field access
+    // This handles cases where the extraction above failed due to formatting
+
+    // Try to find everything between the last ), and )?
+    if let Some(last_close_paren) = trimmed.rfind("),") {
+        let after_close = &trimmed[last_close_paren + 2..];
+        if let Some(question_pos) = after_close.find(")?") {
+            let potential_amount = after_close[..question_pos].trim();
+            if !potential_amount.is_empty() && !potential_amount.contains("signer") {
+                return potential_amount.to_string();
             }
         }
     }
