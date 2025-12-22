@@ -522,6 +522,15 @@ fn transform_body(body: &str, accounts: &[PinocchioAccount], state_structs: &[An
                                "integer_sqrt(amount_a as u128 * amount_b as u128)");
     }
 
+    // Fix lamports operations - remove .to_account_info() since accounts are already AccountInfo
+    if result.contains("try_borrow_mut_lamports") || result.contains("try_borrow_lamports") {
+        // Pattern: account.to_account_info().try_borrow_mut_lamports() → account.try_borrow_mut_lamports()
+        result = result.replace(".to_account_info().try_borrow_mut_lamports", ".try_borrow_mut_lamports");
+        result = result.replace(".to_account_info().try_borrow_lamports", ".try_borrow_lamports");
+        result = result.replace(".to_account_info () . try_borrow_mut_lamports", ".try_borrow_mut_lamports");
+        result = result.replace(".to_account_info () . try_borrow_lamports", ".try_borrow_lamports");
+    }
+
     // Fix Pubkey comparisons - need to dereference key() for equality checks (only if exists)
     if (result.contains(".key()") || result.contains(".key ()"))
         && (result.contains("==") || result.contains("!="))
