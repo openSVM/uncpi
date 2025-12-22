@@ -891,8 +891,19 @@ fn emit_instruction(
             let mint_name = acc.token_mint.as_ref().unwrap();
             let authority_name = acc.token_authority.as_ref().unwrap();
 
+            // Verify rent sysvar address
+            content.push_str("    // Verify Rent sysvar\n");
+            content.push_str("    const RENT_SYSVAR_ID: [u8; 32] = [\n");
+            content.push_str("        6, 167, 213, 23, 24, 199, 116, 201, 40, 86, 99, 152, 105, 29,\n");
+            content.push_str("        94, 182, 139, 94, 184, 163, 155, 75, 109, 92, 115, 85, 91,\n");
+            content.push_str("        33, 0, 0, 0, 0,\n");
+            content.push_str("    ];\n");
+            content.push_str("    if rent_sysvar.key().to_bytes() != RENT_SYSVAR_ID {\n");
+            content.push_str("        return Err(ProgramError::InvalidArgument);\n");
+            content.push_str("    }\n\n");
+
             content.push_str(&format!(
-                "    pinocchio_token::instructions::InitializeAccount2 {{\n        account: {},\n        mint: {},\n        authority: {}.key(),\n    }}.invoke_signed(\n",
+                "    pinocchio_token::instructions::InitializeAccount2 {{\n        account: {},\n        mint: {},\n        authority: {}.key(),\n        rent: rent_sysvar,\n    }}.invoke_signed(\n",
                 acc.name, mint_name, authority_name
             ));
 
