@@ -180,6 +180,58 @@ Integration tests use tempfile to verify:
 
 Tests reference external test files (see `get_test_input()` in tests), so some may be skipped if inputs aren't available.
 
+## Critical Transformation Patterns
+
+### Pinocchio API Differences from Anchor
+
+**CPI Calls:**
+- Pinocchio CPI structs take `AccountInfo` directly, NOT `.key()`
+- `.invoke()` takes NO parameters (accounts are in struct fields)
+- `.invoke_signed()` takes ONLY signer seeds, no account arrays
+
+```rust
+// ❌ Wrong (Anchor-style)
+Transfer {
+    from: user.key(),
+    to: vault.key(),
+    authority: user.key(),
+}.invoke(&[user, vault, authority])?;
+
+// ✅ Correct (Pinocchio)
+Transfer {
+    from: user,
+    to: vault,
+    authority: user,
+}.invoke()?;
+```
+
+**Dereferencing:**
+- `try_borrow_mut_lamports()` returns `RefMut<&mut u64>` - use single `*`
+- `.key()` returns `&[u8; 32]` - dereference for comparisons with `[u8; 32]`
+- State fields are values, not references - no dereference needed
+- Option literals (`None`, `Some`) are NOT references
+
+**Field Access:**
+- Token account fields use helpers: `get_token_mint()`, `get_token_balance()`, `get_token_owner()`
+- State account fields require deserialization first: `account.field` → `account_state.field`
+- AccountInfo methods stay on AccountInfo: `account.key()`, `account.is_writable()`
+
+**Spaced Syntax:**
+- Generated code uses `account . field ()` not `account.field()`
+- All transformations must handle both spaced and non-spaced patterns
+
+**Unsafe Operations:**
+- `AccountInfo::assign()` is unsafe - wrap in `unsafe {}` blocks
+
+### Transformation Order Matters
+
+Apply transformations in this order to avoid conflicts:
+1. Field access (token/state)
+2. State access transformation
+3. Comparisons and dereferencing
+4. CPI patterns
+5. Final cleanup
+
 ## Code Style
 
 - Use descriptive error messages with context (anyhow)
@@ -187,6 +239,7 @@ Tests reference external test files (see `get_test_input()` in tests), so some m
 - Generate human-readable output with proper formatting (prettyplease)
 - Keep IR types serializable for debugging
 - Verbose mode should show phase-by-phase progress
+- Optimize for performance: minimize string allocations in hot paths
 - Run `cargo fmt` before committing
 - Ensure `cargo clippy` passes without warnings
 
