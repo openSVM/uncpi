@@ -19,22 +19,22 @@ pub fn token_transfer_cpi(
         from: {}.key(),
         to: {}.key(),
         authority: {}.key(),
+        amount: {},
     }}.invoke_signed(
         &[{}.clone(), {}.clone(), {}.clone()],
         &[&[
 {}
         ]],
     )?;
-    // Transfer amount: {}
 "#,
             from_account,
             to_account,
             authority,
+            amount,
             from_account,
             to_account,
             authority,
-            seeds_code.join("\n"),
-            amount
+            seeds_code.join("\n")
         )
     } else {
         format!(
@@ -43,10 +43,10 @@ pub fn token_transfer_cpi(
         from: {}.key(),
         to: {}.key(),
         authority: {}.key(),
+        amount: {},
     }}.invoke(&[{}.clone(), {}.clone(), {}.clone()])?;
-    // Transfer amount: {}
 "#,
-            from_account, to_account, authority, from_account, to_account, authority, amount
+            from_account, to_account, authority, amount, from_account, to_account, authority
         )
     }
 }
@@ -68,22 +68,22 @@ pub fn token_mint_to_cpi(
         mint: {}.key(),
         account: {}.key(),
         mint_authority: {}.key(),
+        amount: {},
     }}.invoke_signed(
         &[{}.clone(), {}.clone(), {}.clone()],
         &[&[
 {}
         ]],
     )?;
-    // Mint amount: {}
 "#,
             mint_account,
             to_account,
             authority,
+            amount,
             mint_account,
             to_account,
             authority,
-            seeds_code.join("\n"),
-            amount
+            seeds_code.join("\n")
         )
     } else {
         format!(
@@ -92,10 +92,10 @@ pub fn token_mint_to_cpi(
         mint: {}.key(),
         account: {}.key(),
         mint_authority: {}.key(),
+        amount: {},
     }}.invoke(&[{}.clone(), {}.clone(), {}.clone()])?;
-    // Mint amount: {}
 "#,
-            mint_account, to_account, authority, mint_account, to_account, authority, amount
+            mint_account, to_account, authority, amount, mint_account, to_account, authority
         )
     }
 }
@@ -113,10 +113,10 @@ pub fn token_burn_cpi(
         account: {}.key(),
         mint: {}.key(),
         authority: {}.key(),
+        amount: {},
     }}.invoke(&[{}.clone(), {}.clone(), {}.clone()])?;
-    // Burn amount: {}
 "#,
-        from_account, mint_account, authority, from_account, mint_account, authority, amount
+        from_account, mint_account, authority, amount, from_account, mint_account, authority
     )
 }
 
