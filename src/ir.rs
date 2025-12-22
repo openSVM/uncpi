@@ -182,6 +182,7 @@ pub struct PinocchioAccount {
     pub token_mint: Option<String>,      // For init token accounts
     pub token_authority: Option<String>, // For init token accounts
     pub init_payer: Option<String>,      // Who pays for initialization
+    pub state_type: Option<String>,      // The state struct type for this account (e.g., "Pool", "Escrow")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

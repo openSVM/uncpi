@@ -790,7 +790,7 @@ fn emit_instruction(
     }
 
     // Deserialize state accounts early if their fields are referenced in validations
-    let mut state_accounts_to_deserialize = Vec::new();
+    let mut state_accounts_to_deserialize: Vec<(String, String)> = Vec::new(); // (account_name, state_type)
     for validation in &inst.validations {
         let validation_str = match validation {
             Validation::PdaCheck { seeds, .. } => seeds.join(" "),
@@ -798,37 +798,29 @@ fn emit_instruction(
             _ => String::new(),
         };
 
-        // Check if any account's fields are referenced (e.g., "pool.bump", "pool.authority")
+        // Check if any account's fields are referenced (e.g., "pool_state.bump", "escrow_state.initializer")
         for acc in &inst.accounts {
             // Check if this account has a state type
-            // Match if account name is contained in state name (e.g., "pool" in "StablePool")
-            let has_state_type = program
-                .state_structs
-                .iter()
-                .any(|s| s.name.to_lowercase().contains(&acc.name.to_lowercase()));
-            if has_state_type
-                && validation_str.contains(&format!("{} . ", acc.name))
-                && !state_accounts_to_deserialize.contains(&acc.name)
-            {
-                state_accounts_to_deserialize.push(acc.name.clone());
+            if let Some(state_type) = &acc.state_type {
+                // Check if state fields are referenced in validation (use _state suffix to avoid shadowing)
+                if validation_str.contains(&format!("{}_state . ", acc.name))
+                    && !state_accounts_to_deserialize
+                        .iter()
+                        .any(|(name, _)| name == &acc.name)
+                {
+                    state_accounts_to_deserialize.push((acc.name.clone(), state_type.clone()));
+                }
             }
         }
     }
 
     if !state_accounts_to_deserialize.is_empty() {
         content.push_str("    // Deserialize state accounts needed for validation\n");
-        for acc_name in &state_accounts_to_deserialize {
-            // Find the matching state struct (account name should be contained in state name)
-            if let Some(state) = program
-                .state_structs
-                .iter()
-                .find(|s| s.name.to_lowercase().contains(&acc_name.to_lowercase()))
-            {
-                content.push_str(&format!(
-                    "    let {}_state = {}::from_account_info({})?;\n",
-                    acc_name, state.name, acc_name
-                ));
-            }
+        for (acc_name, state_type) in &state_accounts_to_deserialize {
+            content.push_str(&format!(
+                "    let {}_state = {}::from_account_info({})?;\n",
+                acc_name, state_type, acc_name
+            ));
         }
         content.push('\n');
     }
@@ -876,7 +868,7 @@ fn emit_instruction(
                         let mut seed = s.clone();
 
                         // Transform state field references: "pool . bump" -> "pool_state.bump"
-                        for state_acc in &state_accounts_to_deserialize {
+                        for (state_acc, _) in &state_accounts_to_deserialize {
                             let pattern = format!("{} . ", state_acc);
                             if seed.contains(&pattern) {
                                 seed = seed.replace(&pattern, &format!("{}_state.", state_acc));
@@ -903,7 +895,7 @@ fn emit_instruction(
                 if let Some(bump_var) = bump {
                     let mut transformed_bump = bump_var.clone();
                     // Transform state field references in bump
-                    for state_acc in &state_accounts_to_deserialize {
+                    for (state_acc, _) in &state_accounts_to_deserialize {
                         let pattern = format!("{} . ", state_acc);
                         if transformed_bump.contains(&pattern) {
                             transformed_bump = transformed_bump
@@ -971,7 +963,7 @@ fn emit_instruction(
                 }
                 // Transform state field references in custom validation code
                 let mut transformed_code = code.clone();
-                for state_acc in &state_accounts_to_deserialize {
+                for (state_acc, _) in &state_accounts_to_deserialize {
                     let pattern = format!("{} . ", state_acc);
                     transformed_code =
                         transformed_code.replace(&pattern, &format!("{}_state.", state_acc));

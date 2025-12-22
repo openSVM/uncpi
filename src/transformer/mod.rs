@@ -144,10 +144,10 @@ fn transform_instruction(
         .collect();
 
     // Generate validations
-    let validations = generate_validations(&account_struct);
+    let validations = generate_validations(&account_struct, &accounts);
 
     // Transform body (replace Anchor patterns with Pinocchio)
-    let body = transform_body(&anchor_inst.body, &accounts, config);
+    let body = transform_body(&anchor_inst.body, &accounts, &program.state_structs, config);
 
     Ok(PinocchioInstruction {
         name: anchor_inst.name.clone(),
@@ -203,6 +203,12 @@ fn transform_account(
         }
     });
 
+    // Extract state type from Account<'info, T> if present
+    let state_type = match &anchor_acc.ty {
+        AccountType::Account { inner } => Some(inner.clone()),
+        _ => None,
+    };
+
     PinocchioAccount {
         name: anchor_acc.name.clone(),
         index,
@@ -214,10 +220,11 @@ fn transform_account(
         token_mint,
         token_authority,
         init_payer,
+        state_type,
     }
 }
 
-fn generate_validations(account_struct: &AnchorAccountStruct) -> Vec<Validation> {
+fn generate_validations(account_struct: &AnchorAccountStruct, pinocchio_accounts: &[PinocchioAccount]) -> Vec<Validation> {
     let mut validations = Vec::new();
 
     for (idx, account) in account_struct.accounts.iter().enumerate() {
@@ -247,16 +254,22 @@ fn generate_validations(account_struct: &AnchorAccountStruct) -> Vec<Validation>
                     })
                     .flatten();
 
+                // Transform seed expressions to use _state suffix for state field access
+                let transformed_seeds: Vec<String> = seeds
+                    .iter()
+                    .map(|seed| transform_seed_expr(seed, pinocchio_accounts))
+                    .collect();
+
                 validations.push(Validation::PdaCheck {
                     account_idx: idx,
-                    seeds: seeds.clone(),
+                    seeds: transformed_seeds,
                     bump,
                 });
             }
 
             // Custom constraint - transform the expression
             if let AccountConstraint::Constraint { expr, error } = constraint {
-                let transformed_expr = transform_constraint_expr(expr, &account_struct.accounts);
+                let transformed_expr = transform_constraint_expr(expr, &account_struct.accounts, pinocchio_accounts);
                 let error_msg = error.as_deref().unwrap_or("ProgramError::Custom(0)");
                 validations.push(Validation::Custom {
                     code: format!(
@@ -272,30 +285,74 @@ fn generate_validations(account_struct: &AnchorAccountStruct) -> Vec<Validation>
     validations
 }
 
+/// Transform seed expressions to use _state suffix for state field access
+fn transform_seed_expr(seed: &str, pinocchio_accounts: &[PinocchioAccount]) -> String {
+    let mut result = seed.to_string();
+
+    // Only transform if the seed STARTS with an account name that has a state type
+    // This prevents transforming nested field access like "escrow.initializer"
+    // where "initializer" is a field, not an account
+
+    // Find which account (if any) this seed starts with
+    for acc in pinocchio_accounts {
+        if acc.state_type.is_some() {
+            // Check if seed starts with "account." or "account "
+            let starts_with_acc = result.starts_with(&format!("{}.", acc.name)) ||
+                                  result.starts_with(&format!("{} . ", acc.name));
+
+            // Also check for .key() to exclude that pattern
+            let is_key_call = result.contains(&format!("{}.key()", acc.name)) ||
+                             result.contains(&format!("{} . key ()", acc.name));
+
+            if starts_with_acc && !is_key_call {
+                // Only replace at the START of the string
+                let pattern = format!("{}.", acc.name);
+                let pattern_spaced = format!("{} . ", acc.name);
+
+                if result.starts_with(&pattern) {
+                    result = result.replacen(&pattern, &format!("{}_state.", acc.name), 1);
+                } else if result.starts_with(&pattern_spaced) {
+                    result = result.replacen(&pattern_spaced, &format!("{}_state . ", acc.name), 1);
+                }
+                break; // Only transform once, at the start
+            }
+        }
+    }
+
+    result
+}
+
 /// Transform constraint expressions from Anchor to Pinocchio
-fn transform_constraint_expr(expr: &str, accounts: &[AnchorAccount]) -> String {
+fn transform_constraint_expr(expr: &str, _accounts: &[AnchorAccount], pinocchio_accounts: &[PinocchioAccount]) -> String {
     let mut result = expr.to_string();
 
     // Sort accounts by name length (longest first) to avoid partial matches
-    let mut sorted_accounts: Vec<_> = accounts.iter().enumerate().collect();
-    sorted_accounts.sort_by(|a, b| b.1.name.len().cmp(&a.1.name.len()));
+    let mut sorted_accounts: Vec<_> = pinocchio_accounts.iter().collect();
+    sorted_accounts.sort_by(|a, b| b.name.len().cmp(&a.name.len()));
 
     // Replace account references
-    for (_idx, acc) in sorted_accounts {
-        // Replace acc.key() with *accounts[idx].key() (dereference for comparison)
+    for acc in sorted_accounts {
+        // Replace acc.key() with *acc.key() (dereference for comparison)
         let key_pattern = format!("{}.key()", acc.name);
         if result.contains(&key_pattern) {
             result = result.replace(&key_pattern, &format!("*{}.key()", acc.name));
         }
 
         // Replace acc.field with acc_state.field for state access
-        // (This would need more sophisticated type checking in production)
+        if acc.state_type.is_some() && result.contains(&format!("{}.", acc.name)) {
+            // Check if it's a field access (not a method call like .key())
+            if !result.contains(&format!("{}.key()", acc.name)) &&
+               !result.contains(&format!("{}.is_writable()", acc.name)) &&
+               !result.contains(&format!("{}.is_signer()", acc.name)) {
+                result = result.replace(&format!("{}.", acc.name), &format!("{}_state.", acc.name));
+            }
+        }
     }
 
     result
 }
 
-fn transform_body(body: &str, accounts: &[PinocchioAccount], config: &Config) -> String {
+fn transform_body(body: &str, accounts: &[PinocchioAccount], state_structs: &[AnchorStateStruct], config: &Config) -> String {
     // ULTRA OPTIMIZATION: Early exit for empty/tiny bodies
     if body.len() < 5 {
         return body.to_string();
@@ -417,11 +474,13 @@ fn transform_body(body: &str, accounts: &[PinocchioAccount], config: &Config) ->
     }
 
     // NOW do state access transformation (after clean_spaces normalizes patterns)
-    if result.contains("pool.")
-        || result.contains("farming_period.")
-        || result.contains("position.")
-    {
-        result = transform_state_access_final(&result);
+    // Check if any accounts with state types are referenced
+    let has_state_access = accounts.iter().any(|acc| {
+        acc.state_type.is_some() && result.contains(&format!("{}.", acc.name))
+    });
+
+    if has_state_access {
+        result = transform_state_access_final(&result, accounts, state_structs);
     }
 
     // Fix Pubkey field assignments - need to dereference .key() (only if assignment exists)
@@ -562,7 +621,7 @@ fn strip_msg_calls(body: &str) -> String {
 }
 
 /// Final pass to add state deserialization (runs after clean_spaces)
-fn transform_state_access_final(body: &str) -> String {
+fn transform_state_access_final(body: &str, accounts: &[PinocchioAccount], state_structs: &[AnchorStateStruct]) -> String {
     // Early exit if body is very short
     if body.len() < 20 {
         return body.to_string();
@@ -570,65 +629,45 @@ fn transform_state_access_final(body: &str) -> String {
 
     let mut result = body.to_string();
 
-    // Patterns for state accounts and their types
-    let state_patterns = [
-        ("pool", "StablePool"),
-        ("farming_period", "FarmingPeriod"),
-        ("user_position", "UserFarmingPosition"),
-        ("stake_position", "UserFarmingPosition"),
-    ];
-
-    // Handle alias patterns - replace period with farming_period, etc BEFORE detection
-    // (Only if patterns exist - performance optimization)
-    if result.contains("let period") {
-        result = result.replace("let period = & mut farming_period ;", "");
-        result = result.replace("let period = &mut farming_period;", "");
-    }
-    if result.contains("let position") {
-        result = result.replace("let position = & mut user_position ;", "");
-        result = result.replace("let position = &mut user_position;", "");
-    }
-    if result.contains("let pool") {
-        result = result.replace("let pool = & mut pool ;", "");
-        result = result.replace("let pool = &mut pool;", "");
-    }
-
-    // Replace alias usages with the actual account name BEFORE field detection
-    // Only do this if the patterns exist (performance optimization)
-    if result.contains("period.") || result.contains("position.") {
-        let mut lines: Vec<String> = result.lines().map(String::from).collect();
-        for line in &mut lines {
-            // Only replace standalone period. not farming_period.
-            if line.contains("period.") && !line.contains("farming_period.") {
-                *line = line.replace("period.", "farming_period.");
-            }
-            if line.contains("position.") && !line.contains("user_position.") {
-                *line = line.replace("position.", "user_position.");
-            }
-        }
-        result = lines.join("\n");
-    }
-
     // Check which state accounts need deserialization
-    let mut needs_deser: Vec<(&str, &str)> = Vec::new();
+    let mut needs_deser: Vec<(String, String)> = Vec::new(); // (account_name, state_type)
 
-    for (acc_name, state_type) in &state_patterns {
-        // Look for field access patterns like pool.bags_balance
-        let field_pattern = format!("{}.", acc_name);
-        if result.contains(&field_pattern) {
-            // Don't add if it's only method calls like pool.key() or pool.is_writable()
-            let has_field_access = has_state_field_access(&result, acc_name);
-            if has_field_access {
-                needs_deser.push((acc_name, state_type));
+    for acc in accounts {
+        if let Some(state_type) = &acc.state_type {
+            // More precise detection: look for "account.field" at word boundaries
+            // This avoids matching "escrow_state.initializer" when checking for "initializer" account
+            let field_pattern = format!("{}.", acc.name);
+            let field_pattern_spaced = format!("{} . ", acc.name);
+
+            // Only check if pattern appears and isn't preceded by another account name or "_state"
+            let has_pattern = result.contains(&field_pattern) || result.contains(&field_pattern_spaced);
+
+            if has_pattern {
+                // Verify it's the actual account being accessed, not just a field name
+                // Skip if the pattern only appears as part of "{acc_name}_state"
+                let state_pattern = format!("{}_state.", acc.name);
+                let only_as_state = result.contains(&state_pattern) &&
+                                   !result.contains(&format!(" {}.", acc.name)) &&
+                                   !result.contains(&format!("({}.", acc.name)) &&
+                                   !result.contains(&format!("\n{}.", acc.name)) &&
+                                   !result.contains(&format!(";{}.", acc.name));
+
+                if !only_as_state {
+                    // Check if it's actual field access (not just method calls)
+                    let has_field_access = has_state_field_access_dynamic(&result, &acc.name, state_structs, state_type);
+                    if has_field_access {
+                        needs_deser.push((acc.name.clone(), state_type.clone()));
+                    }
+                }
             }
         }
     }
 
     // If we have state accounts, insert deserialization and rename fields
     if !needs_deser.is_empty() {
-        // First replace field accesses
-        for (acc_name, _) in &needs_deser {
-            result = replace_state_fields(&result, acc_name);
+        // First replace field accesses: account.field -> account_state.field
+        for (acc_name, state_type) in &needs_deser {
+            result = replace_state_fields_dynamic(&result, acc_name, state_structs, state_type);
         }
 
         // Then add deserialization block at the start
@@ -890,6 +929,71 @@ fn replace_state_fields(body: &str, acc_name: &str) -> String {
         // Pattern: = {name}_key ; -> = *{name}_key ;
         result = result.replace(&format!("= {} ;", key_var), &format!("= *{} ;", key_var));
         result = result.replace(&format!("= {};", key_var), &format!("= *{};", key_var));
+    }
+
+    result
+}
+
+/// Dynamic version: Check if account has actual field access (not just method calls)
+fn has_state_field_access_dynamic(body: &str, acc_name: &str, state_structs: &[AnchorStateStruct], state_type: &str) -> bool {
+    // Find the actual state struct
+    let state_struct = state_structs.iter().find(|s| &s.name == state_type);
+
+    if let Some(state) = state_struct {
+        // Check if any of the state's fields are accessed AT WORD BOUNDARIES
+        for field in &state.fields {
+            // Check for patterns with word boundaries (space, paren, start of line)
+            for prefix in [" ", "(", "\n", ";", ",", "&"] {
+                let pattern = format!("{}{}.{}", prefix, acc_name, field.name);
+                let pattern_spaced = format!("{}{} . {}", prefix, acc_name, field.name);
+                if body.contains(&pattern) || body.contains(&pattern_spaced) {
+                    return true;
+                }
+            }
+            // Also check at start of string
+            let pattern_start = format!("{}.{}", acc_name, field.name);
+            let pattern_start_spaced = format!("{} . {}", acc_name, field.name);
+            if body.starts_with(&pattern_start) || body.starts_with(&pattern_start_spaced) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// Dynamic version: Replace state field access using actual field names from state struct
+fn replace_state_fields_dynamic(body: &str, acc_name: &str, state_structs: &[AnchorStateStruct], state_type: &str) -> String {
+    let mut result = body.to_string();
+
+    // Find the actual state struct
+    let state_struct = state_structs.iter().find(|s| &s.name == state_type);
+
+    if let Some(state) = state_struct {
+        let state_name = format!("{}_state", acc_name);
+
+        // Transform each field access: account.field -> account_state.field
+        for field in &state.fields {
+            let old = format!("{}.", acc_name);
+            let old_spaced = format!("{} . ", acc_name);
+            let new = format!("{}.", state_name);
+
+            // Replace patterns: account.fieldname -> account_state.fieldname
+            let pattern = format!("{}{}", old, field.name);
+            let pattern_spaced = format!("{}{}", old_spaced, field.name);
+            let replacement = format!("{}{}", new, field.name);
+
+            result = result.replace(&pattern, &replacement);
+            result = result.replace(&pattern_spaced, &replacement);
+        }
+
+        // IMPORTANT: Undo transformations of method calls (not field access)
+        // Methods like .key(), .is_writable() should stay on AccountInfo, not state
+        for method in ["key", "is_writable", "is_signer", "is_mut"] {
+            // Revert both spaced and non-spaced method calls
+            result = result.replace(&format!("{}.{} ()", state_name, method), &format!("{}.{}()", acc_name, method));
+            result = result.replace(&format!("{}.{}()", state_name, method), &format!("{}.{}()", acc_name, method));
+        }
     }
 
     result
