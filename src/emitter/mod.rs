@@ -410,10 +410,7 @@ fn emit_lib_rs(program: &PinocchioProgram, src_dir: &Path, has_helpers: bool) ->
     content.push_str("#[cfg(not(feature = \"no-entrypoint\"))]\n");
     content.push_str("entrypoint!(process_instruction);\n\n");
 
-    // Panic handler for no_std
-    content.push_str("#[cfg(not(feature = \"no-entrypoint\"))]\n");
-    content.push_str("#[panic_handler]\n");
-    content.push_str("fn panic(_: &core::panic::PanicInfo) -> ! { loop {} }\n\n");
+    // Note: Pinocchio provides its own panic handler, so we don't define one here
 
     // Discriminator constants
     content.push_str("// Instruction discriminators (Anchor-compatible)\n");
@@ -653,11 +650,34 @@ fn emit_instruction(
     content.push_str("use crate::error::Error;\n");
     content.push_str("use crate::helpers::*;\n");
 
-    // Import state structs if referenced
+    // Import state structs if referenced in body or validations
+    let mut imported_states = std::collections::HashSet::new();
     for state in &program.state_structs {
+        // Check if referenced in instruction body
         if inst.body.contains(&state.name) {
-            content.push_str(&format!("use crate::state::{};\n", state.name));
+            imported_states.insert(state.name.clone());
         }
+
+        // Check if referenced in validations (for early deserialization)
+        for validation in &inst.validations {
+            let validation_str = match validation {
+                Validation::PdaCheck { seeds, .. } => seeds.join(" "),
+                Validation::Custom { code } => code.clone(),
+                _ => String::new(),
+            };
+
+            // Check if any account fields are referenced that would require this state type
+            for acc in &inst.accounts {
+                if state.name.to_lowercase().contains(&acc.name.to_lowercase())
+                    && validation_str.contains(&format!("{} . ", acc.name)) {
+                    imported_states.insert(state.name.clone());
+                }
+            }
+        }
+    }
+
+    for state_name in &imported_states {
+        content.push_str(&format!("use crate::state::{};\n", state_name));
     }
     content.push('\n');
 
