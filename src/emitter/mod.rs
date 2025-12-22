@@ -1110,7 +1110,9 @@ fn emit_instruction(
         content.push_str("    // Transformed instruction logic\n");
         // Add the transformed body (will have some TODO markers)
         // First, fix any multi-line msg! macros
-        let fixed_body = fix_msg_macros(&inst.body);
+        let mut fixed_body = fix_msg_macros(&inst.body);
+        // Fix .key() assignments that need dereferencing
+        fixed_body = fix_key_dereferencing(&fixed_body);
         for line in fixed_body.lines() {
             let trimmed = line.trim();
             if !trimmed.is_empty() {
@@ -1226,4 +1228,37 @@ fn get_arg_parse_code(ty: &str, offset: usize, name: &str) -> (usize, String) {
             (0, format!("// TODO: Parse {} of type {} at offset {}", name, ty, offset))
         }
     }
+}
+
+/// Fix .key() calls that need dereferencing in assignments
+fn fix_key_dereferencing(body: &str) -> String {
+    let mut result = String::new();
+    
+    for line in body.lines() {
+        let mut new_line = line.to_string();
+        
+        // Pattern: something = account.key () ; (with spaces)
+        // Pattern: something = account.key() ; (no spaces)
+        // Also handle: account . key () (space before dot)
+        if line.contains(" = ") && line.contains("key ()")  {
+            // Check if not already dereferenced
+            if !line.contains(" = *") && !line.contains(" =*") {
+                // More precise: Only add * right before the identifier that has .key()
+                // Find the position of " = " and add * after it
+                if let Some(eq_pos) = new_line.find(" = ") {
+                    let before = &new_line[..eq_pos + 3]; // Include " = "
+                    let after = &new_line[eq_pos + 3..];
+                    new_line = format!("{}*{}", before, after);
+                }
+            }
+        }
+        
+        result.push_str(&new_line);
+        result.push('\n');
+    }
+    
+    // Clean up potential double dereferences
+    result = result.replace(" = **", " = *");
+    
+    result
 }

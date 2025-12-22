@@ -2180,34 +2180,35 @@ fn fix_token_amount_access(body: &str) -> String {
 fn fix_pubkey_assignments(body: &str) -> String {
     let mut result = body.to_string();
 
-    // Pubkey fields that need dereferencing when assigned
-    let pubkey_fields = [
-        "authority",
-        "bags_mint",
-        "pump_mint",
-        "bags_vault",
-        "pump_vault",
-        "lp_mint",
-        "pool",
-        "reward_mint",
-        "owner",
-        "farming_period",
-        "pending_authority",
-    ];
+    // Pattern: anything = account.key() -> anything = *account.key()
+    // This handles assignments where .key() returns &[u8; 32] but we need [u8; 32]
 
-    // Pattern: field = account.key() -> field = *account.key()
-    // Use simple string replacement for common patterns
-    for field in &pubkey_fields {
-        // Pattern: _state.field = acc.key () ;
-        result = result.replace(
-            &format!("_state.{} = ", field),
-            &format!("_state.{} = *", field),
-        );
-        result = result.replace(
-            &format!("period.{} = ", field),
-            &format!("period.{} = *", field),
-        );
-    }
+    // Replace pattern: " = <something>.key ()" with " = *<something>.key ()"
+    // But only if not already dereferenced
+    let lines: Vec<String> = result.lines().map(|line| {
+        let mut new_line = line.to_string();
+
+        // Look for assignment pattern with .key() or .key ()
+        if line.contains(" = ") && (line.contains(".key ()") || line.contains(".key()") || line.contains(" . key ()") || line.contains(" . key()")) {
+            // Check if it's NOT already dereferenced
+            if !line.contains(" = *") && !line.contains(" =*") {
+                // Add dereference: " = " -> " = *"
+                // Find the equals sign and .key to make sure we're in an assignment
+                if let Some(eq_pos) = new_line.find(" = ") {
+                    let after_eq = &new_line[eq_pos + 3..];
+                    // Check for .key with optional spaces
+                    if after_eq.contains(". key") || after_eq.contains(".key") {
+                        // Replace " = " with " = *" for this line
+                        new_line = new_line.replacen(" = ", " = *", 1);
+                    }
+                }
+            }
+        }
+
+        new_line
+    }).collect();
+
+    result = lines.join("\n");
 
     // Clean up double asterisks that might have been created
     result = result.replace(" = **", " = *");
