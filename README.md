@@ -303,5 +303,21 @@ MIT
 - [FINAL-RESULTS.md](FINAL-RESULTS.md) - Complete v0.3.0 test results
 - [PRODUCTION-VALIDATION.md](PRODUCTION-VALIDATION.md) - Validation against real-world programs
 - [TESTING-SUMMARY.md](TESTING-SUMMARY.md) - Comprehensive testing methodology
+- [CLMM-ANALYSIS.md](CLMM-ANALYSIS.md) - Raydium CLMM analysis and feasibility assessment
+- [CLMM-COMPLETE.md](CLMM-COMPLETE.md) - Simplified CLMM demo build results
 - [CLAUDE.md](CLAUDE.md) - Developer guide for contributing
+
+## 🚀 Example Projects
+
+Real-world programs built with uncpi:
+
+- **[Pinray AMM](https://github.com/openSVM/pinray)** - Constant product AMM (x * y = k)
+  - 85% smaller than Anchor
+  - 90% cheaper deployment
+  - Production-ready patterns
+
+- **[Pinray CLMM](https://github.com/openSVM/pinray-clmm)** - Simplified Concentrated Liquidity
+  - Educational demo
+  - Q64.64 fixed-point math
+  - Single tick range implementation
 
