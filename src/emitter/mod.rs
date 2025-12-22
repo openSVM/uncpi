@@ -757,6 +757,46 @@ fn emit_instruction(
         content.push('\n');
     }
 
+    // Deserialize state accounts early if their fields are referenced in validations
+    let mut state_accounts_to_deserialize = Vec::new();
+    for validation in &inst.validations {
+        let validation_str = match validation {
+            Validation::PdaCheck { seeds, .. } => seeds.join(" "),
+            Validation::Custom { code } => code.clone(),
+            _ => String::new(),
+        };
+
+        // Check if any account's fields are referenced (e.g., "pool.bump", "pool.authority")
+        for acc in &inst.accounts {
+            // Check if this account has a state type
+            // Match if account name is contained in state name (e.g., "pool" in "StablePool")
+            let has_state_type = program.state_structs.iter().any(|s| {
+                s.name.to_lowercase().contains(&acc.name.to_lowercase())
+            });
+            if has_state_type && validation_str.contains(&format!("{} . ", acc.name)) {
+                if !state_accounts_to_deserialize.contains(&acc.name) {
+                    state_accounts_to_deserialize.push(acc.name.clone());
+                }
+            }
+        }
+    }
+
+    if !state_accounts_to_deserialize.is_empty() {
+        content.push_str("    // Deserialize state accounts needed for validation\n");
+        for acc_name in &state_accounts_to_deserialize {
+            // Find the matching state struct (account name should be contained in state name)
+            if let Some(state) = program.state_structs.iter().find(|s| {
+                s.name.to_lowercase().contains(&acc_name.to_lowercase())
+            }) {
+                content.push_str(&format!(
+                    "    let {}_state = {}::from_account_info({})?;\n",
+                    acc_name, state.name, acc_name
+                ));
+            }
+        }
+        content.push('\n');
+    }
+
     // Emit validations
     let mut has_validations = false;
     for validation in &inst.validations {
@@ -797,18 +837,28 @@ fn emit_instruction(
                 let mut seeds_code: Vec<String> = seeds
                     .iter()
                     .map(|s| {
-                        if s.starts_with("b\"") {
-                            format!("{}.as_ref()", s)
-                        } else if s.contains(".key()") {
-                            let acc_name = s
+                        let mut seed = s.clone();
+
+                        // Transform state field references: "pool . bump" -> "pool_state.bump"
+                        for state_acc in &state_accounts_to_deserialize {
+                            let pattern = format!("{} . ", state_acc);
+                            if seed.contains(&pattern) {
+                                seed = seed.replace(&pattern, &format!("{}_state.", state_acc));
+                            }
+                        }
+
+                        if seed.starts_with("b\"") {
+                            format!("{}.as_ref()", seed)
+                        } else if seed.contains(".key()") {
+                            let acc_name = seed
                                 .replace(".key()", "")
                                 .replace(".as_ref()", "")
                                 .replace(" ", "");
                             format!("{}.key().as_ref()", acc_name)
-                        } else if s.contains("as_ref") {
-                            s.clone()
+                        } else if seed.contains("as_ref") {
+                            seed
                         } else {
-                            format!("{}.as_ref()", s)
+                            format!("{}.as_ref()", seed)
                         }
                     })
                     .collect();
@@ -821,18 +871,34 @@ fn emit_instruction(
                 // Generate the PDA verification code
                 content.push_str(&format!("    // Verify PDA for {}\n", acc.name));
 
-                // If account is being initialized, always use find_program_address to get bump
-                if acc.is_init || bump.is_none() {
-                    // Find the bump (needed for init or when bump not provided)
+                // Check if this PDA references its own state fields (self-referential)
+                // Check in ORIGINAL seeds OR bump for the pattern "accountname . "
+                let is_self_referential = seeds.iter().any(|s| {
+                    s.contains(&format!("{} . ", acc.name))
+                }) || bump.as_ref().map_or(false, |b| b.contains(&format!("{} . ", acc.name)));
+
+                // If account is being initialized, self-referential, or bump not provided, use find_program_address
+                if acc.is_init || bump.is_none() || is_self_referential {
+                    // For find_program_address, don't include the bump in seeds (it's what we're finding)
+                    // Remove the last seed if it contains a bump reference
+                    let mut find_seeds = seeds_code.clone();
+                    if let Some(last) = find_seeds.last() {
+                        // Remove if it's a bump seed (contains .bump or is a byte array reference)
+                        if last.contains(".bump") || (last.starts_with("&[") && !last.contains("b\"")) {
+                            find_seeds.pop();
+                        }
+                    }
+
+                    // Find the bump (needed for init, self-reference, or when bump not provided)
                     content.push_str(&format!(
                         "    let (expected_{}, _bump_{}) = pinocchio::pubkey::find_program_address(\n",
                         acc.name, acc.name
                     ));
-                    content.push_str(&format!("        &[{}],\n", seeds_code.join(", ")));
+                    content.push_str(&format!("        &[{}],\n", find_seeds.join(", ")));
                     content.push_str("        program_id,\n");
                     content.push_str("    );\n");
                 } else {
-                    // If bump is provided from another field, use create_program_address
+                    // If bump is provided from another account's field, use create_program_address
                     content.push_str(&format!(
                         "    let expected_{} = pinocchio::pubkey::create_program_address(\n",
                         acc.name
@@ -853,7 +919,13 @@ fn emit_instruction(
                     content.push_str("    // Validate accounts\n");
                     has_validations = true;
                 }
-                content.push_str(&format!("    {}\n", code));
+                // Transform state field references in custom validation code
+                let mut transformed_code = code.clone();
+                for state_acc in &state_accounts_to_deserialize {
+                    let pattern = format!("{} . ", state_acc);
+                    transformed_code = transformed_code.replace(&pattern, &format!("{}_state.", state_acc));
+                }
+                content.push_str(&format!("    {}\n", transformed_code));
             }
             _ => {}
         }
