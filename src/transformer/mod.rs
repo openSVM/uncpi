@@ -809,28 +809,28 @@ fn replace_state_fields(body: &str, acc_name: &str) -> String {
         "farming_period",
     ];
 
+    // Transform state fields (both spaced and non-spaced patterns)
+    let state_name = format!("{}_state", acc_name);
     for field in &state_fields {
-        // Handle both spaced and non-spaced patterns
-        let old_pattern = format!("{}.{}", acc_name, field);
-        let old_pattern_spaced = format!("{} . {}", acc_name, field);
-        let new_pattern = format!("{}_state.{}", acc_name, field);
-        result = result.replace(&old_pattern, &new_pattern);
-        result = result.replace(&old_pattern_spaced, &new_pattern);
+        let old = format!("{}.", acc_name);
+        let old_spaced = format!("{} . ", acc_name);
+        let new = format!("{}.", state_name);
+
+        // Only replace if followed by the field name
+        let pattern = format!("{}{}", old, field);
+        let pattern_spaced = format!("{}{}", old_spaced, field);
+        let replacement = format!("{}{}", new, field);
+
+        result = result.replace(&pattern, &replacement);
+        result = result.replace(&pattern_spaced, &replacement);
     }
 
-    // IMPORTANT: Undo any transformations of method calls (not field access)
-    // Methods like .key(), .is_writable() should stay on the AccountInfo, not state
-    let account_methods = ["key", "is_writable", "is_signer", "is_mut"];
-    for method in &account_methods {
-        // Fix both spaced and non-spaced method calls
-        result = result.replace(
-            &format!("{}_state.{} ()", acc_name, method),
-            &format!("{}.{}()", acc_name, method),
-        );
-        result = result.replace(
-            &format!("{}_state.{}()", acc_name, method),
-            &format!("{}.{}()", acc_name, method),
-        );
+    // IMPORTANT: Undo transformations of method calls (not field access)
+    // Methods like .key(), .is_writable() should stay on AccountInfo, not state
+    for method in ["key", "is_writable", "is_signer", "is_mut"] {
+        // Revert both spaced and non-spaced method calls
+        result = result.replace(&format!("{}.{} ()", state_name, method), &format!("{}.{}()", acc_name, method));
+        result = result.replace(&format!("{}.{}()", state_name, method), &format!("{}.{}()", acc_name, method));
     }
 
     // Also replace references like &pool in function calls with &pool_state
@@ -2017,30 +2017,22 @@ fn fix_token_amount_access(body: &str) -> String {
         "admin_pump",
     ];
 
+    // Process all token accounts with a helper function to reduce allocations
+    let process_token_field = |result: &mut String, acc: &str, field: &str, helper: &str| {
+        let pattern = format!("{}.{}", acc, field);
+        let pattern_spaced = format!("{} . {}", acc, field);
+        let replacement = format!("{}({})?", helper, acc);
+        *result = result.replace(&pattern, &replacement);
+        *result = result.replace(&pattern_spaced, &replacement);
+    };
+
     for acc in &token_accounts {
-        // Replace patterns like bags_vault.amount with get_token_balance(bags_vault)?
-        // Handle both spaced and non-spaced versions
-        let amount_pattern = format!("{}.amount", acc);
-        let amount_pattern_spaced = format!("{} . amount", acc);
-        let amount_replacement = format!("get_token_balance({})?", acc);
-        result = result.replace(&amount_pattern, &amount_replacement);
-        result = result.replace(&amount_pattern_spaced, &amount_replacement);
+        process_token_field(&mut result, acc, "amount", "get_token_balance");
+        process_token_field(&mut result, acc, "mint", "get_token_mint");
 
-        // Replace patterns like user_token.mint with get_token_mint(user_token)?
-        let mint_pattern = format!("{}.mint", acc);
-        let mint_pattern_spaced = format!("{} . mint", acc);
-        let mint_replacement = format!("get_token_mint({})?", acc);
-        result = result.replace(&mint_pattern, &mint_replacement);
-        result = result.replace(&mint_pattern_spaced, &mint_replacement);
-
-        // Replace patterns like user_token.owner with get_token_owner(user_token)?
-        let owner_pattern = format!("{}.owner", acc);
-        let owner_pattern_spaced = format!("{} . owner", acc);
-        // But only if it's accessing token account owner, not user.owner which is different
+        // Only transform .owner for actual token accounts, not "user"
         if acc != &"user" {
-            let owner_replacement = format!("get_token_owner({})?", acc);
-            result = result.replace(&owner_pattern, &owner_replacement);
-            result = result.replace(&owner_pattern_spaced, &owner_replacement);
+            process_token_field(&mut result, acc, "owner", "get_token_owner");
         }
     }
 
