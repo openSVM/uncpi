@@ -3,7 +3,10 @@
 use anyhow::{Context, Result};
 use quote::ToTokens;
 use std::path::Path;
-use syn::{parse_file, Attribute, Field, Item, ItemMod, ItemStruct, Type};
+use syn::{
+    parse_file, Attribute, Field, GenericArgument, Item, ItemMod, ItemStruct,
+    PathArguments, Type, TypePath,
+};
 
 use crate::ir::*;
 
@@ -431,6 +434,41 @@ fn parse_account_constraints(attrs: &[Attribute]) -> Vec<AccountConstraint> {
     constraints
 }
 
+/// Detect if a type is Vec<T> and extract the element type
+fn is_vec_type(ty: &Type) -> Option<String> {
+    if let Type::Path(TypePath { path, .. }) = ty {
+        if let Some(segment) = path.segments.last() {
+            if segment.ident == "Vec" {
+                if let PathArguments::AngleBracketed(args) = &segment.arguments {
+                    if let Some(GenericArgument::Type(inner_ty)) = args.args.first() {
+                        return Some(quote::quote!(#inner_ty).to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Extract #[max_len(N)] attribute for Vec fields
+fn extract_max_len_for_vec(attrs: &[Attribute]) -> Option<usize> {
+    for attr in attrs {
+        if attr.path().is_ident("max_len") {
+            let tokens = attr_to_string(attr);
+            // Parse "max_len(200)" or "max_len = 200"
+            if let Some(start) = tokens.find('(') {
+                if let Some(end) = tokens.find(')') {
+                    let num_str = tokens[start + 1..end].trim();
+                    if let Ok(num) = num_str.parse::<usize>() {
+                        return Some(num);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 fn parse_state_struct(s: &ItemStruct) -> Result<AnchorStateStruct> {
     let name = s.ident.to_string();
     let has_init_space = has_derive(&s.attrs, "InitSpace");
@@ -449,12 +487,27 @@ fn parse_state_struct(s: &ItemStruct) -> Result<AnchorStateStruct> {
             // Extract #[max_len(N)] if present
             let max_len = extract_max_len(&field.attrs);
 
+            // Check if this is a Vec<T>
+            let (is_vec, vec_info) = if let Some(element_type) = is_vec_type(&field.ty) {
+                let vec_max_len = extract_max_len_for_vec(&field.attrs);
+                let vec_field = VecField {
+                    name: field_name.clone(),
+                    element_type,
+                    max_len: vec_max_len,
+                    resolved_max_len: 0, // Will be resolved later
+                    is_mutable: true,
+                };
+                (true, Some(vec_field))
+            } else {
+                (false, None)
+            };
+
             fields.push(StateField {
                 name: field_name,
                 ty: field_ty,
                 max_len,
-                is_vec: false,      // TODO: Implement Vec detection
-                vec_info: None,     // TODO: Implement Vec parsing
+                is_vec,
+                vec_info,
             });
         }
     }
