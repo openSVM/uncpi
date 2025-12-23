@@ -128,6 +128,8 @@ All IR types are serializable via serde for debugging and intermediate output.
 
 - `src/cpi_helpers.rs` - CPI call detection and transformation helpers
 - `src/idl.rs` - IDL generation and verification against original Anchor IDL
+- `src/collections.rs` - Vec/VecDeque transformation logic (v0.4.0)
+- `src/zero_copy.rs` - AccountLoader/zero-copy transformation (v0.4.0)
 
 ## Key Transformations
 
@@ -242,6 +244,55 @@ Apply transformations in this order to avoid conflicts:
 - Optimize for performance: minimize string allocations in hot paths
 - Run `cargo fmt` before committing
 - Ensure `cargo clippy` passes without warnings
+
+## v0.4.0 Advanced Features (In Development)
+
+Four major features are being developed to increase transpilation success rate from 80% to 95%+:
+
+### 1. Vec<T> Support (`src/collections.rs`, `docs/VEC_SUPPORT_DESIGN.md`)
+**Status**: Detection implemented, transformation pending
+
+- Transform `Vec<T>` to fixed-size arrays with length tracking
+- Detects `Vec<T>` types and `#[max_len(N)]` attributes in parser
+- Will transform to `[T; N]` array + `_len: u8` field
+- Enables multisig programs and dynamic lists
+
+**IR Extensions**:
+- `VecField` struct tracks element type and max length
+- `StateField.is_vec` and `StateField.vec_info` populated by parser
+
+**Implementation**:
+- `is_vec_type()` - Detects Vec<T> in AST (✅ Working)
+- `extract_max_len_for_vec()` - Parses #[max_len(N)] (✅ Working)
+- `transform_vec_operations()` - Transforms push/iter/len (⏳ TODO)
+- `generate_vec_helpers()` - Helper methods (⏳ TODO)
+
+### 2. AccountLoader Equivalent (`src/zero_copy.rs`, `docs/ACCOUNT_LOADER_DESIGN.md`)
+**Status**: Design complete, implementation pending
+
+- Zero-copy deserialization for large state accounts (10KB+)
+- Detects `#[account(zero_copy(unsafe))]` and `#[repr(C, packed)]`
+- Generates `unsafe fn load()` and `unsafe fn load_mut()` methods
+- Critical for Raydium CLMM PoolState pattern
+
+**IR Extensions**:
+- `AnchorStateStruct.is_zero_copy`, `.is_packed`, `.is_unsafe` flags
+
+### 3. VecDeque Transformation (`docs/VECDEQUE_DESIGN.md`)
+**Status**: Design complete, implementation pending
+
+- Transform `VecDeque<T>` to circular arrays with head/tail pointers
+- Enables multi-tick crossing in CLMM swap operations
+- Uses modulo arithmetic for wraparound
+
+### 4. Advanced CPI Patterns (`docs/ADVANCED_CPI_DESIGN.md`)
+**Status**: Design complete, implementation pending
+
+- Support for `ctx.remaining_accounts`
+- Dynamic account selection patterns
+- `Interface<'info, T>` runtime dispatch
+
+**Priority**: AccountLoader > VecDeque > Vec > Advanced CPI (for full CLMM support)
 
 ## Release Process
 
