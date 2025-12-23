@@ -603,13 +603,29 @@ fn emit_state_rs(program: &PinocchioProgram, src_dir: &Path) -> Result<()> {
         content.push_str(&format!("pub struct {} {{\n", state.name));
 
         for field in &state.fields {
-            // Transform String to [u8; N] if max_len is specified
-            let field_type = if field.ty == "String" && field.max_len.is_some() {
-                format!("[u8; {}]", field.max_len.unwrap())
+            // Transform Vec<T> to [T; N] if is_vec
+            if field.is_vec {
+                if let Some(ref vec_info) = field.vec_info {
+                    let max_len = vec_info.get_max_len();
+                    // Convert Pubkey to [u8; 32] for Pinocchio
+                    let element_type = vec_info.element_type.replace("Pubkey", "[u8; 32]");
+                    // Emit the array field
+                    content.push_str(&format!("    pub {}: [{};  {}],\n",
+                        field.name, element_type, max_len));
+                    // Emit the length field
+                    let len_type = vec_info.length_type();
+                    content.push_str(&format!("    pub {}: {},\n",
+                        vec_info.length_field_name(), len_type));
+                }
             } else {
-                field.ty.clone()
-            };
-            content.push_str(&format!("    pub {}: {},\n", field.name, field_type));
+                // Transform String to [u8; N] if max_len is specified
+                let field_type = if field.ty == "String" && field.max_len.is_some() {
+                    format!("[u8; {}]", field.max_len.unwrap())
+                } else {
+                    field.ty.clone()
+                };
+                content.push_str(&format!("    pub {}: {},\n", field.name, field_type));
+            }
         }
 
         content.push_str("}\n\n");

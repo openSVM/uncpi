@@ -259,6 +259,10 @@ pub struct PinocchioField {
     pub size: usize,
     pub offset: usize,
     pub max_len: Option<usize>, // For String fields with #[max_len(N)]
+    #[serde(default)]
+    pub is_vec: bool,
+    #[serde(default)]
+    pub vec_info: Option<VecField>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -3,8 +3,8 @@
 //! This module provides transformations for collection types that aren't
 //! available in no_std environments.
 
-use crate::ir::{StateField, VecField};
-use serde::{Deserialize, Serialize};
+use crate::ir::VecField;
+use regex::Regex;
 
 /// Default maximum sizes for Vec<T> when no #[max_len] is specified
 pub const DEFAULT_VEC_SIZES: &[(&str, usize)] = &[
@@ -91,26 +91,77 @@ pub fn transform_vec_operations(body: &str, vec_fields: &[VecField]) -> String {
         let vec_name = &vec_field.name;
         let len_name = vec_field.length_field_name();
         let max_len = vec_field.get_max_len();
-        let len_ty = vec_field.length_type();
 
         // Transform vec.push(item)
-        // Pattern: vec.push(item)
-        // Result: { if len >= MAX { return Err(VecOverflow); } vec[len] = item; len += 1; }
-        let push_pattern = format!("{}.push(", vec_name);
-        if result.contains(&push_pattern) {
-            // This is complex - need to handle the closing paren and semicolon
-            // For now, mark it for manual handling in transformer
-            result = result.replace(
-                &push_pattern,
-                &format!("/* TODO: transform push */ {}.push(", vec_name)
-            );
+        // Pattern: (prefix.)?vec.push(value) or (prefix.)?vec.push(value)?
+        // Result: bounds check + assignment + increment
+        // Handle both "signers.push" and "state.signers.push"
+        let push_pattern_str = format!(
+            r"(\w+\.)?{}\s*\.\s*push\s*\(\s*([^)]+)\s*\)\s*(\?)?",
+            regex::escape(vec_name)
+        );
+        if let Ok(push_re) = Regex::new(&push_pattern_str) {
+            // Collect all matches first to avoid borrowing issues
+            let matches: Vec<_> = push_re.captures_iter(&result).map(|cap| {
+                let full_match = cap.get(0).unwrap().as_str().to_string();
+                let prefix = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+                let value = cap.get(2).unwrap().as_str().to_string();
+                let has_question = cap.get(3).is_some();
+                (full_match, prefix.to_string(), value, has_question)
+            }).collect();
+
+            for (full_match, prefix, value, has_question) in matches {
+                let replacement = if has_question {
+                    // With error handling: vec.push(value)?
+                    format!(
+                        "{{ if {}{} as usize >= {} {{ return Err(ProgramError::Custom(0)); }} \
+                        {}{}[{}{} as usize] = {}; {}{} += 1; Ok::<(), ProgramError>(()) }}?",
+                        prefix, len_name, max_len,
+                        prefix, vec_name, prefix, len_name, value,
+                        prefix, len_name
+                    )
+                } else {
+                    // Without error handling: vec.push(value)
+                    // Dereference the value if it's a reference
+                    let deref_value = if value.starts_with('&') || value.contains(" & ") {
+                        value.clone()
+                    } else {
+                        value.clone()
+                    };
+                    format!(
+                        "{{ if ({}{} as usize) >= {} {{ return Err(ProgramError::Custom(0)); }} \
+                        {}{}[{}{} as usize] = *{}; {}{} += 1; }}",
+                        prefix, len_name, max_len,
+                        prefix, vec_name, prefix, len_name, deref_value,
+                        prefix, len_name
+                    )
+                };
+                result = result.replace(&full_match, &replacement);
+            }
         }
 
-        // Transform vec.len()
+        // Transform vec.len() - handle both direct and state-prefixed patterns
+        // Pattern 1: signers.len() → signers_len as usize
         result = result.replace(
             &format!("{}.len()", vec_name),
             &format!("{} as usize", len_name)
         );
+        // Pattern 2: state.signers.len() → state.signers_len as usize
+        // We need to preserve any prefix like "multisig_state."
+        let len_pattern = format!(".{}.len ()", vec_name);
+        if result.contains(&len_pattern) {
+            result = result.replace(
+                &len_pattern,
+                &format!(".{} as usize", len_name)
+            );
+        }
+        let len_pattern_compact = format!(".{}.len()", vec_name);
+        if result.contains(&len_pattern_compact) {
+            result = result.replace(
+                &len_pattern_compact,
+                &format!(".{} as usize", len_name)
+            );
+        }
 
         // Transform vec.is_empty()
         result = result.replace(
@@ -118,17 +169,61 @@ pub fn transform_vec_operations(body: &str, vec_fields: &[VecField]) -> String {
             &format!("({} == 0)", len_name)
         );
 
-        // Transform vec.iter()
-        result = result.replace(
-            &format!("{}.iter()", vec_name),
-            &format!("{}[..{} as usize].iter()", vec_name, len_name)
+        // Transform vec.iter() - use regex to capture prefix
+        let iter_pattern_str = format!(
+            r"(\w+\.)?{}\s*\.\s*iter\s*\(\s*\)",
+            regex::escape(vec_name)
         );
+        if let Ok(iter_re) = Regex::new(&iter_pattern_str) {
+            let matches: Vec<_> = iter_re.captures_iter(&result).map(|cap| {
+                let full_match = cap.get(0).unwrap().as_str().to_string();
+                let prefix = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+                (full_match, prefix.to_string())
+            }).collect();
+
+            for (full_match, prefix) in matches {
+                let replacement = format!(
+                    "{}{}[..{}{} as usize].iter()",
+                    prefix, vec_name, prefix, len_name
+                );
+                result = result.replace(&full_match, &replacement);
+            }
+        }
 
         // Transform vec.clear()
         result = result.replace(
             &format!("{}.clear()", vec_name),
             &format!("{} = 0", len_name)
         );
+
+        // Transform vec.remove(index)
+        // Pattern: (prefix.)?vec.remove(index)
+        // Result: shift elements left and decrement length
+        let remove_pattern_str = format!(
+            r"(\w+\.)?{}\s*\.\s*remove\s*\(\s*([^)]+)\s*\)",
+            regex::escape(vec_name)
+        );
+        if let Ok(remove_re) = Regex::new(&remove_pattern_str) {
+            let matches: Vec<_> = remove_re.captures_iter(&result).map(|cap| {
+                let full_match = cap.get(0).unwrap().as_str().to_string();
+                let prefix = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+                let index = cap.get(2).unwrap().as_str().to_string();
+                (full_match, prefix.to_string(), index)
+            }).collect();
+
+            for (full_match, prefix, index) in matches {
+                let replacement = format!(
+                    "{{ let idx = {}; \
+                    for i in idx..({}{} as usize - 1) {{ {}{}[i] = {}{}[i + 1]; }} \
+                    {}{} -= 1; }}",
+                    index,
+                    prefix, len_name,
+                    prefix, vec_name, prefix, vec_name,
+                    prefix, len_name
+                );
+                result = result.replace(&full_match, &replacement);
+            }
+        }
 
         // Transform Vec::new()
         result = result.replace(

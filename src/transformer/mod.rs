@@ -548,7 +548,18 @@ fn transform_body(body: &str, accounts: &[PinocchioAccount], state_structs: &[An
         result = strip_msg_calls(&result);
     }
 
-    // Replace Vec with fixed arrays for no_std compatibility
+    // Transform Vec operations for state structs with Vec fields
+    let vec_fields: Vec<_> = state_structs
+        .iter()
+        .flat_map(|s| s.fields.iter())
+        .filter_map(|f| f.vec_info.as_ref())
+        .cloned()
+        .collect();
+    if !vec_fields.is_empty() {
+        result = crate::collections::transform_vec_operations(&result, &vec_fields);
+    }
+
+    // Replace Vec with fixed arrays for no_std compatibility (legacy)
     if result.contains("Vec") {
         result = replace_vec_with_array(&result);
     }
@@ -2411,6 +2422,34 @@ fn transform_state(
         .fields
         .iter()
         .map(|f| {
+            // Handle Vec<T> fields
+            if f.is_vec {
+                if let Some(ref vec_info) = f.vec_info {
+                    let max_len = vec_info.get_max_len();
+                    let element_size = vec_info.element_size();
+                    let len_type_size = match vec_info.length_type() {
+                        "u8" => 1,
+                        "u16" => 2,
+                        _ => std::mem::size_of::<usize>(),
+                    };
+                    // Total size = array size + length field size
+                    let total_size = (element_size * max_len) + len_type_size;
+                    let field_ty = format!("[{}; {}]", vec_info.element_type, max_len);
+
+                    let field = PinocchioField {
+                        name: f.name.clone(),
+                        ty: rust_type_to_pinocchio(&field_ty),
+                        size: total_size,
+                        offset,
+                        max_len: f.max_len,
+                        is_vec: true,
+                        vec_info: Some(vec_info.clone()),
+                    };
+                    offset += total_size;
+                    return field;
+                }
+            }
+
             // Transform String to [u8; N] if max_len is specified
             let field_ty = if f.ty == "String" && f.max_len.is_some() {
                 format!("[u8; {}]", f.max_len.unwrap())
@@ -2428,6 +2467,8 @@ fn transform_state(
                 size,
                 offset,
                 max_len: f.max_len,
+                is_vec: false,
+                vec_info: None,
             };
             offset += size;
             field
